@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="description" content="iNaturalist API Expandable Taxa" />
+<title>iNaturalist API Expandable Taxa</title>
+<style>
+ul, #myUL {
+  list-style-type: none;
+}
+
+#myUL {
+  margin: 0;
+  padding: 0;
+}
+
+.collapsed::before {
+  cursor: pointer;
+  -webkit-user-select: none; /* Safari 3.1+ */
+  -moz-user-select: none; /* Firefox 2+ */
+  -ms-user-select: none; /* IE 10+ */
+  user-select: none;
+  content: "\2795";
+  color: black;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.expanded::before {
+  cursor: pointer;
+  -webkit-user-select: none; /* Safari 3.1+ */
+  -moz-user-select: none; /* Firefox 2+ */
+  -ms-user-select: none; /* IE 10+ */
+  user-select: none;
+  content: "\2796";
+  color: black;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.leaf {
+  color: black;
+  display: inline-block;
+  margin-right: 6px;
+  margin-left: 1.75em;
+  margin-top: 0.2em;
+}
+
+.nested {
+  display: none;
+}
+
+.active {
+  display: block;
+}
+</style></head>
+
+<body>
+<script>
+
+const pageSize = 500;
+
+var mainElement = faddelem('ul',document.body,null,'myUL','');
+
+function setMain(etype,eclass=null,eid=null,ehtml=null) {
+    document.body.removeChild(mainElement);
+    mainElement = faddelem(etype,document.body,eclass,eid,ehtml);
+    return mainElement;
+};
+
+function furl(url,txt=url) { return '<a href="'+url+'">'+txt+'</a>'; };
+
+function faddelem(etype,eparent,eclass=null,eid=null,ehtml=null) {
+   var eobj = document.createElement(etype);
+   if (eclass!==null) { eobj.classList = eclass };
+   if (eid!==null) { eobj.id = eid };
+   if (ehtml!==null) { eobj.innerHTML = ehtml };
+   eparent.appendChild(eobj);
+   return eobj;
+};
+
+function fApiToJson(url) {
+    return fetch(url)
+    .then((response) => {
+        if (!response.ok) { throw new Error(response.status+' ('+response.statusText+') returned from '+response.url); };
+        return response.json();
+    })
+}
+
+function fcallapi(taxonId) {
+    const apiurl = 'https://api.inaturalist.org/v1/taxa?is_active=true&only_id=false&all_names=false&per_page='+pageSize;
+    return fApiToJson(apiurl+'&parent_id='+taxonId+'&page=1')
+    .then((data) => {
+        if (data.total_results <= pageSize) {
+            return Promise.resolve([data.results]);
+        } else {
+            var promises = [Promise.resolve(data.results)];
+            const numPages = Math.ceil(data.total_results / pageSize);
+            for (var page=2; page<=numPages; page++) {
+                promises.push(fApiToJson(apiurl+'&parent_id='+taxonId+'&page='+page).then((data) => { return data.results }));
+            };
+            return Promise.all(promises);
+        };
+    })
+    .then((data) => { return [].concat.apply([], data); })
+    .catch((err) => {
+        console.error(err.message);
+        setMain('p',null,null,'There was a problem retrieving data. Error '+err.message+'.')
+    });
+};
+
+
+function fExpandElement() {
+    var nested = this.parentElement.querySelector(".nested");
+    if(nested){
+        this.classList.toggle("collapsed");
+        this.classList.toggle("expanded");
+        nested.classList.toggle("active");
+    } else {
+        fcallapi(this.taxonId).then((results) => {
+            if (results.length > 0) {
+                var newlist = faddelem('ul',this.parentElement,'nested',null,'');
+                newlist.classList.toggle("active");
+                this.classList.toggle("collapsed");
+                this.classList.toggle("expanded");
+                this.innerHTML += ' (' + results.length +')';
+                fresults(results, newlist);
+            } else {
+                this.classList = 'leaf';
+            }});
+    };
+};
+
+
+// Sorts taxa, first by rank_level, then alphabetically (same as iNat)
+function compTaxa(a, b) {
+    var rankCompare = b.rank_level - a.rank_level;
+    if (rankCompare == 0) {
+        if (a.name < b.name) {
+            return -1;
+        } if (a.name > b.name) {
+            return 1;
+        } else {
+            return 0;
+        }
+    } else {
+        return rankCompare;
+    }
+}
+
+function fresults(results, parent) {
+    results.sort(compTaxa);
+    var expandElem;
+    // Go through all the results and add each to the tree
+    for (var i=0; i<results.length; i++) {
+        var listElem  = faddelem('li',parent,null,null,'');
+        const prettyName = results[i].rank[0].toUpperCase() + results[i].rank.slice(1) + ': ' + results[i].name;
+        expandElem = faddelem('span',listElem,'collapsed',null,furl('https://www.inaturalist.org/taxa/'+results[i].id,prettyName));
+        expandElem.taxonId = results[i].id;
+        expandElem.addEventListener("click", fExpandElement);
+    };
+    return expandElem;
+};
+
+// Set up the page: clear the page, call the API for the name of the taxon entered in the box, set it as the root, expand it
+function freset() {
+    setMain('ul',null,'myUL','');
+    fApiToJson('https://api.inaturalist.org/v1/taxa?per_page=1&taxon_id=' + document.getElementById("root").value)
+    .then((data) => { 
+        fExpandElement.call(fresults(data.results, mainElement)) 
+    })
+    .catch((err) => {
+        console.error(err.message);
+        setMain('p',null,null,'There was a problem retrieving data. Error '+err.message+'.')
+    });
+};
+
+
+
+faddelem('h1',document.body,null,null,'iNaturalist Taxa');
+// Add a box for rooting the tree; it defaults to Life (48460)
+faddelem('p', document.body,null,null,'Root Taxon ID: ' + '<input type="text" id="root" value="48460">  ' + '<button onclick="freset()">Submit</button>');
+
+// This is for making the enter button work in the text box.
+document.getElementById("root").addEventListener("keyup", function(event) {
+  if (event.keyCode === 13) {
+   event.preventDefault();
+   freset();
+  }
+});
+
+freset();
+
+</script>
+</body>
+
+</html>
