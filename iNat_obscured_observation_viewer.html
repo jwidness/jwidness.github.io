@@ -72,9 +72,12 @@
     }
     .panel-header h2 { margin: 0; font-size: 1.1rem; flex: 1; }
     .auth-as { margin: 0 0 10px 0; font-size: 0.9rem; color: #444; }
+    .limit-msg { margin: 0 0 10px 0; font-size: 0.85rem; color: #666; }
     .instructions { margin: 0 0 10px 0; color: #444; font-size: 0.9rem; }
     .panel p { margin: 0 0 10px 0; color: #444; font-size: 0.9rem; }
     .panel label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.85rem; }
+    .panel .checkbox-label { display: flex; align-items: center; gap: 8px; font-weight: normal; margin-bottom: 8px; }
+    .panel .checkbox-label input { width: auto; margin: 0; }
     .panel input, .panel button, .panel textarea { width: 100%; padding: 8px 10px; margin-bottom: 8px; }
     .panel button {
       background: #74ac00;
@@ -136,6 +139,7 @@
       </div>
       <div id="authPrompt" class="auth-prompt">
         <p>To see <strong>true coordinates</strong> when you have permission (your observations, users who trust you, projects that trust you), authorize with iNaturalist below. Without authorization obscured coordinates remain obscured.</p>
+        <p class="limit-msg">Search is limited to 10,000 observations.</p>
         <button type="button" id="authorize">Authorize with iNaturalist</button>
       </div>
       <p id="authAs" class="auth-as" style="display: none;" aria-live="polite"></p>
@@ -143,6 +147,7 @@
       <button type="button" id="drawArea" class="draw-btn">Draw search area ✏️</button>
       <label for="extraParams">Query parameters</label>
       <textarea id="extraParams" rows="2" placeholder="e.g. place_id=12345&amp;taxon_id=1&amp;user_id=tiwane"></textarea>
+      <label class="checkbox-label"><input type="checkbox" id="obscuredOnly"> Only obscured/private observations</label>
       <button type="button" id="search">Search observations</button>
       <p class="status" id="status" aria-live="polite"></p>
       <button type="button" id="clear" class="secondary">Clear map</button>
@@ -235,10 +240,16 @@
     } else {
     // ========== Map and UI state ==========
     const MAP = L.map('map', { maxZoom: 19, zoomControl: false }).setView([0, -20], 3);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19
-    }).addTo(MAP);
+    });
+    const esriLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '&copy; <a href="https://www.esri.com/">Esri</a>, Maxar, Earthstar Geographics, and the GIS User Community',
+      maxZoom: 19
+    });
+    osmLayer.addTo(MAP);
+    L.control.layers({ 'OpenStreetMap': osmLayer, 'Esri Satellite': esriLayer }, null, { position: 'topright' }).addTo(MAP);
     L.control.zoom({ position: 'topright' }).addTo(MAP);
 
     let observationLayer = null;
@@ -288,6 +299,7 @@
     // ========== DOM refs and panel behavior ==========
     const authorizeBtn = document.getElementById('authorize');
     const extraParamsEl = document.getElementById('extraParams');
+    const obscuredOnlyEl = document.getElementById('obscuredOnly');
     const statusEl = document.getElementById('status');
     const searchBtn = document.getElementById('search');
     const clearBtn = document.getElementById('clear');
@@ -493,6 +505,7 @@
         params.set('nelng', String(ne.lng));
       }
       if (viewerPrefs.preferred_place_id) params.set('preferred_place_id', String(viewerPrefs.preferred_place_id));
+      if (obscuredOnlyEl && obscuredOnlyEl.checked) params.set('obscuration', 'obscured,private');
       if (extra) {
         try {
           const parsed = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
