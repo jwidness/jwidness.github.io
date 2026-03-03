@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+  iNaturalist Obscured Observation Viewer — map viewer with optional auth to see true coordinates.
+  Hosted on GitHub Pages. OAuth uses PKCE; register the exact page URL as redirect URI at
+  https://www.inaturalist.org/oauth/applications
+  PKCE flow will not work in legacy Edge / IE. User content from the API is escaped before display.
+  -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Authenticated iNaturalist observation viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    #map { height: 100vh; width: 100%; }
+    .panel {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 1000;
+      background: #fff;
+      padding: 12px 16px 8px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+      width: 360px;
+      max-width: 360px;
+      transition: width 0.2s ease, height 0.2s ease, padding 0.2s ease, min-height 0.2s ease;
+    }
+    .panel.collapsed {
+      width: 80px;
+      max-width: 80px;
+      min-width: 80px;
+      min-height: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    .panel.collapsed .panel-body { display: none; }
+    .panel.collapsed .panel-inner { display: none; }
+    .panel-inner { position: relative; width: 100%; }
+    .panel-tab {
+      display: block;
+      width: 100%;
+      margin-top: 8px;
+      padding: 4px 8px;
+      background: #e8e8e8;
+      color: #555;
+      border: 1px solid #bbb;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1;
+      text-align: center;
+    }
+    .panel-tab:hover { background: #ddd; color: #333; }
+    .panel.collapsed .panel-tab {
+      margin-top: 0;
+      border-radius: 8px;
+      padding: 8px;
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .panel-header h2 { margin: 0; font-size: 1.1rem; flex: 1; }
+    .auth-as { margin: 0 0 10px 0; font-size: 0.9rem; color: #444; }
+    .instructions { margin: 0 0 10px 0; color: #444; font-size: 0.9rem; }
+    .panel p { margin: 0 0 10px 0; color: #444; font-size: 0.9rem; }
+    .panel label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.85rem; }
+    .panel input, .panel button, .panel textarea { width: 100%; padding: 8px 10px; margin-bottom: 8px; }
+    .panel button {
+      background: #74ac00;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .panel button:hover { background: #5d8a00; }
+    .panel button.secondary { background: #666; }
+    .panel button.secondary:hover { background: #444; }
+    .panel button:disabled, .panel button.authorized {
+      background: #999;
+      cursor: default;
+    }
+    .panel button.authorized:hover { background: #999; }
+    .token-link { font-size: 0.85rem; }
+    .token-link a { color: #74ac00; }
+    .status { font-size: 0.85rem; color: #666; margin-top: 6px; }
+    .status.error { color: #c00; }
+    .status.status-fetching {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .status .fetching-dots { display: inline-flex; font-size: 1.25em; }
+    .status .fetching-dots .dot {
+      animation: fetching-dot 1.4s ease-in-out infinite both;
+    }
+    .status .fetching-dots .dot:nth-child(2) { animation-delay: 0.2s; }
+    .status .fetching-dots .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes fetching-dot {
+      0%, 60%, 100% { opacity: 0.35; }
+      30% { opacity: 1; }
+    }
+    .status .cancel-search-btn { padding: 2px 8px; font-size: 0.85rem; cursor: pointer; background: #c00; color: #fff; border: none; border-radius: 4px; }
+    .status .cancel-search-btn:hover { background: #a00; }
+    .draw-btn.mode-active { background: #5d8a00; box-shadow: inset 0 0 0 2px #fff; }
+    .blue-teardrop-icon.leaflet-marker-icon { background: transparent; border: none; }
+    .leaflet-popup-content { margin: 8px 12px; min-width: 160px; }
+    .popup-thumb { display: block; width: 75px; height: 75px; object-fit: cover; border-radius: 6px; margin-bottom: 6px; }
+    .popup-title { font-weight: 600; margin-bottom: 4px; }
+    .popup-meta { font-size: 0.85rem; color: #555; }
+    .popup-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 0.85rem; color: #555; }
+    .popup-nav button { padding: 2px 8px; cursor: pointer; background: #e8e8e8; border: 1px solid #bbb; border-radius: 4px; font-size: 0.85rem; }
+    .popup-nav button:hover { background: #ddd; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="panel" id="panel">
+    <div class="panel-inner">
+      <div class="panel-body">
+      <div class="panel-header">
+        <h2>Authenticated iNaturalist observation viewer</h2>
+      </div>
+      <div id="authPrompt" class="auth-prompt">
+        <p>To see <strong>true coordinates</strong> when you have permission (your observations, users who trust you, projects that trust you), authorize with iNaturalist below. Without authorization obscured coordinates remain obscured.</p>
+        <button type="button" id="authorize">Authorize with iNaturalist</button>
+      </div>
+      <p id="authAs" class="auth-as" style="display: none;" aria-live="polite"></p>
+      <p class="instructions">Draw a search area and/or enter <a href="https://forum.inaturalist.org/t/how-to-use-inaturalists-search-urls-wiki-part-1-of-2/63" target="_blank" rel="noopener noreferrer">query parameters</a>, then Search observations.</p>
+      <button type="button" id="drawArea" class="draw-btn">Draw search area ✏️</button>
+      <label for="extraParams">Query parameters</label>
+      <textarea id="extraParams" rows="2" placeholder="e.g. place_id=12345&amp;taxon_id=1&amp;user_id=tiwane"></textarea>
+      <button type="button" id="search">Search observations</button>
+      <p class="status" id="status" aria-live="polite"></p>
+      <button type="button" id="clear" class="secondary">Clear map</button>
+      </div>
+    </div>
+    <button type="button" class="panel-tab" id="panelToggle" title="Collapse panel" aria-label="Collapse panel">^</button>
+  </div>
+
+  <script>
+    // ========== PKCE OAuth helpers ==========
+    // Adapted from https://github.com/jumear/stirfry and https://github.com/aaronpk/pkce-vanilla-js
+    function generateRandomString() {
+      const array = new Uint32Array(28);
+      window.crypto.getRandomValues(array);
+      return Array.from(array, dec => ('0' + dec.toString(16)).slice(-2)).join('');
+    }
+    function sha256(plain) {
+      return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(plain));
+    }
+    function base64urlencode(buffer) {
+      return btoa(String.fromCharCode.apply(null, new Uint8Array(buffer)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    async function pkceChallengeFromVerifier(v) {
+      return base64urlencode(await sha256(v));
+    }
+    function parseQueryString(str) {
+      if (!str) return {};
+      const q = {};
+      str.split('&').forEach(s => {
+        const eq = s.indexOf('=');
+        if (eq < 0) return;
+        const k = decodeURIComponent(s.slice(0, eq));
+        const v = decodeURIComponent(s.slice(eq + 1));
+        if (k) q[k] = v;
+      });
+      return q;
+    }
+
+    // ========== OAuth config ==========
+    const TOKEN_KEY = 'inat_jwt';
+    const INAT_AUTH = 'https://www.inaturalist.org/oauth/authorize';
+    const INAT_TOKEN = 'https://www.inaturalist.org/oauth/token';
+    const INAT_API_TOKEN = 'https://www.inaturalist.org/users/api_token';
+
+    // OAuth: for GitHub Pages. Redirect URI must match this page URL; add it at inaturalist.org/oauth/applications.
+    const OAUTH_CLIENT_ID = '42G05z5o2vC8cgvTiTRhMvnhY2VzMsD0d7kKpIAobbM'; // OAuth app #962
+    // const OAUTH_REDIRECT_URI = 'http://localhost:8080/iNat_obscured_observation_viewer.html';
+    // const OAUTH_REDIRECT_URI = window.location.origin + window.location.pathname;
+    const OAUTH_REDIRECT_URI = 'https://jwidness.github.io/iNat_obscured_observation_viewer.html';
+
+    // ========== OAuth callback: exchange code for JWT ==========
+    const q = parseQueryString(window.location.search.slice(1));
+    if (q.code && q.state && sessionStorage.getItem('pkce_state') === q.state) {
+      const code_verifier = sessionStorage.getItem('pkce_code_verifier');
+      sessionStorage.removeItem('pkce_state');
+      sessionStorage.removeItem('pkce_code_verifier');
+      if (OAUTH_CLIENT_ID && code_verifier) {
+        const body = new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: q.code,
+          client_id: OAUTH_CLIENT_ID,
+          redirect_uri: OAUTH_REDIRECT_URI,
+          code_verifier
+        });
+        fetch(INAT_TOKEN, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+          body: body.toString()
+        })
+          .then(r => r.ok ? r.json() : Promise.reject(new Error(r.status + ' ' + r.statusText)))
+          .then(data => {
+            return fetch(INAT_API_TOKEN, {
+              headers: { 'Authorization': 'Bearer ' + data.access_token }
+            }).then(r => r.ok ? r.json() : Promise.reject(new Error('JWT request failed')));
+          })
+          .then(data => {
+            if (data.api_token) {
+              sessionStorage.setItem(TOKEN_KEY, data.api_token);
+            }
+            window.location.replace(OAUTH_REDIRECT_URI);
+          })
+          .catch(err => {
+            alert('Authorization failed: ' + err.message);
+            window.location.replace(OAUTH_REDIRECT_URI);
+          });
+      } else {
+        window.location.replace(OAUTH_REDIRECT_URI);
+      }
+    } else {
+    // ========== Map and UI state ==========
+    const MAP = L.map('map', { maxZoom: 19, zoomControl: false }).setView([0, -20], 3);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19
+    }).addTo(MAP);
+    L.control.zoom({ position: 'topright' }).addTo(MAP);
+
+    let observationLayer = null;
+    let searchBounds = null;
+    let searchAreaRect = null;
+    let drawStart = null;
+    let drawRect = null;
+    let mapMode = 'pan';
+
+    // ========== Client-side rate limiting ==========
+    // Stay under iNaturalist API limits by spacing requests (count per minute).
+    const RATE_LIMIT_PER_MINUTE = 50;
+    const RATE_LIMIT_WINDOW_MS = 60000;
+    let apiRequestTimestamps = [];
+    let cancelSearchRequested = false;
+
+    async function waitForRateLimit() {
+      let now = Date.now();
+      apiRequestTimestamps = apiRequestTimestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+      while (apiRequestTimestamps.length >= RATE_LIMIT_PER_MINUTE) {
+        const waitMs = (apiRequestTimestamps[0] + RATE_LIMIT_WINDOW_MS) - now + 50;
+        if (waitMs > 0) {
+          const endAt = Date.now() + waitMs;
+          const setRateLimitStatus = () => {
+            const remaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+            statusEl.innerHTML = `Rate limit: waiting ${remaining}s before next request… <button type="button" class="cancel-search-btn">Cancel</button>`;
+            statusEl.classList.remove('error');
+            statusEl.classList.add('status-fetching');
+          };
+          setRateLimitStatus();
+          while (Date.now() < endAt) {
+            if (cancelSearchRequested) throw new Error('RATE_LIMIT_CANCELLED');
+            await new Promise(r => setTimeout(r, 1000));
+            setRateLimitStatus();
+          }
+        }
+        now = Date.now();
+        apiRequestTimestamps = apiRequestTimestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+      }
+      apiRequestTimestamps.push(Date.now());
+    }
+
+    document.addEventListener('click', function (e) {
+      if (e.target.classList.contains('cancel-search-btn')) cancelSearchRequested = true;
+    });
+
+    // ========== DOM refs and panel behavior ==========
+    const authorizeBtn = document.getElementById('authorize');
+    const extraParamsEl = document.getElementById('extraParams');
+    const statusEl = document.getElementById('status');
+    const searchBtn = document.getElementById('search');
+    const clearBtn = document.getElementById('clear');
+    const drawAreaBtn = document.getElementById('drawArea');
+    const panelEl = document.getElementById('panel');
+    const panelToggleBtn = document.getElementById('panelToggle');
+
+    panelToggleBtn.addEventListener('click', () => {
+      panelEl.classList.toggle('collapsed');
+      const isCollapsed = panelEl.classList.contains('collapsed');
+      panelToggleBtn.setAttribute('title', isCollapsed ? 'Expand panel' : 'Collapse panel');
+      panelToggleBtn.setAttribute('aria-label', isCollapsed ? 'Expand panel' : 'Collapse panel');
+      panelToggleBtn.textContent = isCollapsed ? 'v' : '^';
+    });
+
+    function setMapMode(mode) {
+      mapMode = mode;
+      drawAreaBtn.classList.toggle('mode-active', mode === 'draw');
+      if (mode === 'draw') {
+        statusEl.textContent = '';
+        statusEl.classList.remove('error');
+      } else {
+        statusEl.textContent = '';
+      }
+    }
+    drawAreaBtn.addEventListener('click', () => setMapMode('draw'));
+
+    // ========== Auth UI: show "Authorize" vs "Authorized as <user>" ==========
+    function updateAuthorizeButtonState() {
+      const hasToken = !!sessionStorage.getItem(TOKEN_KEY);
+      const authPrompt = document.getElementById('authPrompt');
+      const authAs = document.getElementById('authAs');
+      if (hasToken) {
+        authPrompt.style.display = 'none';
+        authAs.style.display = 'block';
+        if (!authAs.dataset.fetched) {
+          authAs.dataset.fetched = '1';
+          authAs.textContent = 'Authorized…';
+          const headers = { 'Accept': 'application/json', 'Authorization': sessionStorage.getItem(TOKEN_KEY) };
+          fetch('https://api.inaturalist.org/v2/users/me?fields=(login:!t)', { headers })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+              const me = data && (data.results?.[0] ?? data);
+              const login = (me && me.login) ? me.login : '—';
+              authAs.textContent = 'Authorized as ' + login;
+            })
+            .catch(() => { authAs.textContent = 'Authorized'; });
+        }
+      } else {
+        authPrompt.style.display = 'block';
+        authAs.style.display = 'none';
+      }
+    }
+    updateAuthorizeButtonState();
+
+    // Start PKCE flow and redirect to iNaturalist authorize page.
+    authorizeBtn.addEventListener('click', async () => {
+      const state = generateRandomString();
+      const code_verifier = generateRandomString();
+      sessionStorage.setItem('pkce_state', state);
+      sessionStorage.setItem('pkce_code_verifier', code_verifier);
+      const code_challenge = await pkceChallengeFromVerifier(code_verifier);
+      const url = INAT_AUTH + '?response_type=code&client_id=' + encodeURIComponent(OAUTH_CLIENT_ID)
+        + '&state=' + encodeURIComponent(state)
+        + '&redirect_uri=' + encodeURIComponent(OAUTH_REDIRECT_URI)
+        + '&code_challenge=' + encodeURIComponent(code_challenge)
+        + '&code_challenge_method=S256';
+      window.location = url;
+    });
+
+    // ========== Map markers: teardrop (true coords) vs circle (obscured) ==========
+    const BLUE = '#3388ff';
+    const smallPinIcon = L.divIcon({
+      className: 'blue-teardrop-icon',
+      html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 41" width="25" height="41">
+        <path fill="${BLUE}" stroke="rgba(0,0,0,0.25)" stroke-width="1" d="M12.5 0C5.6 0 0 5.6 0 12.5c0 9.4 12.5 28.5 12.5 28.5S25 21.9 25 12.5C25 5.6 19.4 0 12.5 0z"/>
+      </svg>`,
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34]
+    });
+
+    const obscuredCircleOptions = {
+      radius: 10,
+      fillColor: BLUE,
+      color: BLUE,
+      weight: 1.5,
+      fillOpacity: 0.45,
+      opacity: 0.9
+    };
+
+    // ========== Draw-mode: rectangle on map ==========
+    MAP.on('mousedown', (e) => {
+      if (mapMode !== 'draw') return;
+      if (drawRect) return;
+      L.DomEvent.stop(e);
+      MAP.dragging.disable();
+      drawStart = e.latlng;
+      drawRect = L.rectangle(L.latLngBounds(e.latlng, e.latlng), {
+        color: '#d35400',
+        weight: 2,
+        fillOpacity: 0
+      }).addTo(MAP);
+    });
+    MAP.on('mousemove', (e) => {
+      if (!drawStart || !drawRect) return;
+      L.DomEvent.stop(e);
+      drawRect.setBounds(L.latLngBounds(drawStart, e.latlng));
+    });
+    MAP.on('mouseup', () => {
+      if (mapMode !== 'draw' || !drawStart || !drawRect) {
+        if (drawStart && drawRect) MAP.dragging.enable();
+        return;
+      }
+      const bounds = drawRect.getBounds();
+      MAP.dragging.enable();
+      if (bounds.getSouthWest().distanceTo(bounds.getNorthEast()) < 5000) {
+        MAP.removeLayer(drawRect);
+        drawRect = null;
+        drawStart = null;
+        setStatus('Draw a larger area (drag further).', true);
+        setMapMode('pan');
+        return;
+      }
+      searchBounds = bounds;
+      MAP.removeLayer(drawRect);
+      drawRect = null;
+      drawStart = null;
+      if (searchAreaRect) MAP.removeLayer(searchAreaRect);
+      searchAreaRect = L.rectangle(searchBounds, {
+        color: '#d35400',
+        weight: 2,
+        fillOpacity: 0
+      }).addTo(MAP);
+      statusEl.textContent = 'Search area set. Click Search observations.';
+      statusEl.classList.remove('error');
+      setMapMode('pan');
+    });
+
+    function setStatus(msg, isError) {
+      statusEl.textContent = msg;
+      statusEl.classList.remove('status-fetching');
+      statusEl.classList.toggle('error', !!isError);
+    }
+
+    // ========== Search: build params, check count, fetch pages, plot ==========
+    searchBtn.addEventListener('click', async () => {
+      const token = sessionStorage.getItem(TOKEN_KEY) || '';
+      const extra = (extraParamsEl.value || '').trim();
+      if (!searchBounds && !extra) {
+        setStatus('Draw a search area and/or enter query parameters (e.g. place_id), then Search.', true);
+        return;
+      }
+
+      cancelSearchRequested = false;
+      setStatus('Loading…');
+      if (observationLayer) {
+        MAP.removeLayer(observationLayer);
+        observationLayer = null;
+      }
+
+      const headers = { 'Accept': 'application/json' };
+      if (token) headers['Authorization'] = token;
+
+      let viewerPrefs = { locale: null, preferred_place_id: null, prefers_common_names: true, prefers_scientific_name_first: false };
+      if (token) {
+        try {
+          const meRes = await fetch('https://api.inaturalist.org/v2/users/me?fields=(locale:!t,prefers_common_names:!t,prefers_scientific_name_first:!t,search_place_id:!t)', { headers });
+          if (meRes.ok) {
+            const data = await meRes.json();
+            const me = data.results?.[0] ?? data;
+            viewerPrefs.locale = me.locale || null;
+            const prefCommon = me.prefers_common_names ?? me.preferences?.prefers_common_names;
+            if (typeof prefCommon !== 'undefined') viewerPrefs.prefers_common_names = prefCommon === true;
+            const prefSciFirst = me.prefers_scientific_name_first ?? me.preferences?.prefers_scientific_name_first;
+            if (typeof prefSciFirst !== 'undefined') viewerPrefs.prefers_scientific_name_first = prefSciFirst === true;
+            if (me.search_place_id) viewerPrefs.preferred_place_id = me.search_place_id;
+          }
+        } catch (e) { /* use defaults */ }
+      }
+      if (!viewerPrefs.locale) viewerPrefs.locale = navigator.language || 'en';
+
+      const API_BASE = 'https://api.inaturalist.org/v2/observations';
+      // Request only fields we need; obscured=true when location is the public obscured point.
+      const FIELDS_RISON = '(id:!t,geojson:!t,private_geojson:!t,obscured:!t,observed_on:!t,quality_grade:!t,user:(login:!t),taxon:(name:!t,preferred_common_name:!t),photos:(url:!t))';
+      const PER_PAGE = 200;
+      const MAX_RESULTS = 10000;
+
+      const params = new URLSearchParams({
+        per_page: '1',
+        page: '1',
+        order_by: 'created_at',
+        order: 'desc',
+        fields: FIELDS_RISON,
+        locale: viewerPrefs.locale
+      });
+      if (searchBounds) {
+        const sw = searchBounds.getSouthWest();
+        const ne = searchBounds.getNorthEast();
+        params.set('swlat', String(sw.lat));
+        params.set('swlng', String(sw.lng));
+        params.set('nelat', String(ne.lat));
+        params.set('nelng', String(ne.lng));
+      }
+      if (viewerPrefs.preferred_place_id) params.set('preferred_place_id', String(viewerPrefs.preferred_place_id));
+      if (extra) {
+        try {
+          const parsed = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
+          parsed.forEach((value, key) => params.set(key, value));
+        } catch (e) {
+          setStatus('Invalid extra parameters: ' + e.message, true);
+          return;
+        }
+      }
+
+      try {
+        setStatus('Checking result count…');
+        await waitForRateLimit();
+        const checkRes = await fetch(`${API_BASE}?${params}`, { headers });
+        if (!checkRes.ok) {
+          const t = await checkRes.text();
+          setStatus(`API error ${checkRes.status}: ${t.slice(0, 120)}`, true);
+          return;
+        }
+        const checkData = await checkRes.json();
+        const totalResults = checkData.total_results ?? 0;
+        if (totalResults > MAX_RESULTS) {
+          setStatus('This search has over 10,000 results. Please draw a smaller area or add query parameters (e.g. taxon_id, place_id, user_id, quality_grade) to narrow the search.', true);
+          return;
+        }
+
+        params.set('per_page', String(PER_PAGE));
+        const totalPages = Math.ceil(totalResults / PER_PAGE) || 1;
+        const allObservations = [];
+        const perPage = parseInt(params.get('per_page') || '200', 10) || 200;
+        const BATCH_SIZE = 10; // fetch up to 10 pages in parallel per batch
+        cancelSearchRequested = false;
+
+        function setFetchStatus(retrieved, total) {
+          const t = (total ?? 0);
+          const dots = '<span class="fetching-dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span>';
+          statusEl.innerHTML = 'Retrieving ' + t.toLocaleString() + ' observations' + dots + ' <button type="button" class="cancel-search-btn">Cancel</button>';
+          statusEl.classList.remove('error');
+          statusEl.classList.add('status-fetching');
+        }
+        setFetchStatus(0, totalResults);
+
+        batch: for (let batchStart = 1; batchStart <= totalPages; batchStart += BATCH_SIZE) {
+          if (cancelSearchRequested) {
+            setStatus('Search cancelled.');
+            return;
+          }
+          const batchEnd = Math.min(batchStart + BATCH_SIZE - 1, totalPages);
+          for (let p = batchStart; p <= batchEnd; p++) await waitForRateLimit();
+          const batchPromises = [];
+          for (let p = batchStart; p <= batchEnd; p++) {
+            const pParams = new URLSearchParams(params);
+            pParams.set('page', String(p));
+            batchPromises.push(
+              fetch(`${API_BASE}?${pParams}`, { headers }).then(r => {
+                if (!r.ok) return Promise.reject(new Error(r.status + ' ' + r.statusText));
+                return r.json();
+              })
+            );
+          }
+          let batchResults;
+          try {
+            batchResults = await Promise.all(batchPromises);
+          } catch (err) {
+            setStatus('API error: ' + err.message, true);
+            return;
+          }
+          for (const data of batchResults) {
+            const results = data.results || [];
+            allObservations.push(...results);
+            setFetchStatus(allObservations.length, totalResults);
+            if (results.length < perPage) break batch;
+          }
+          if (batchResults.some(d => (d.results || []).length < perPage)) break;
+        }
+
+        if (cancelSearchRequested) {
+          setStatus('Search cancelled.');
+          return;
+        }
+
+        const observations = allObservations;
+        if (observations.length === 0) {
+          setStatus('No observations in this area.');
+          return;
+        }
+
+        setFetchStatus(observations.length, totalResults);
+        await new Promise(r => setTimeout(r, 0));
+
+        const clusterGroup = L.markerClusterGroup({
+          maxClusterRadius: 40,
+          disableClusteringAtZoom: 10,
+          spiderfyOnMaxZoom: true,
+          iconCreateFunction: function (cluster) {
+            let total = 0;
+            cluster.getAllChildMarkers().forEach(function (m) {
+              total += m._observationCount || 1;
+            });
+            const size = total < 10 ? 'small' : total < 100 ? 'medium' : 'large';
+            return L.divIcon({
+              html: '<div><span>' + total + '</span></div>',
+              className: 'marker-cluster marker-cluster-' + size,
+              iconSize: L.point(40, 40)
+            });
+          }
+        });
+        const popupMarkerRegistry = {};
+        window._popupMarkerRegistry = popupMarkerRegistry;
+        let popupIdCounter = 0;
+        let plotted = 0;
+        let privateCount = 0;
+        const boundsLatLngs = [];
+        const byCoord = {}; // key = "lat_lng", value = [{ obs, usedPrivate, isObscuredPoint, latObs, lngObs }, ...]
+        // Resolve coordinates: prefer private_geojson when present (true coords), else geojson/location (may be obscured).
+        observations.forEach(obs => {
+          let latObs = null;
+          let lngObs = null;
+          let usedPrivate = false;
+          const geo = obs.private_geojson || obs.privateGeojson || obs.geojson;
+          if (geo?.coordinates?.length >= 2) {
+            lngObs = geo.coordinates[0];
+            latObs = geo.coordinates[1];
+            if ((obs.private_geojson || obs.privateGeojson)?.coordinates?.length >= 2) usedPrivate = true;
+          }
+          if (latObs == null && obs.location) {
+            if (typeof obs.location === 'string') {
+              const parts = obs.location.split(',');
+              if (parts.length >= 2) {
+                latObs = parseFloat(parts[0]);
+                lngObs = parseFloat(parts[1]);
+              }
+            } else {
+              const loc = obs.location;
+              latObs = loc.latitude ?? loc.lat;
+              lngObs = loc.longitude ?? loc.lng;
+            }
+          }
+          if (latObs == null && (obs.private_location || obs.privateLocation)) {
+            const loc = obs.private_location || obs.privateLocation;
+            latObs = loc.latitude ?? loc.lat;
+            lngObs = loc.longitude ?? loc.lng;
+            usedPrivate = true;
+          }
+          if (latObs == null) latObs = obs.latitude ?? obs.lat;
+          if (lngObs == null) lngObs = obs.longitude ?? obs.lng;
+          if (latObs == null || lngObs == null || isNaN(latObs) || isNaN(lngObs)) return;
+          const isObscuredPoint = !usedPrivate && obs.obscured === true;
+          plotted++;
+          if (usedPrivate) privateCount++;
+          boundsLatLngs.push([latObs, lngObs]);
+          const key = `${latObs}_${lngObs}`;
+          if (!byCoord[key]) byCoord[key] = [];
+          byCoord[key].push({ obs, usedPrivate, isObscuredPoint, latObs, lngObs });
+        });
+
+        // One marker per unique coord: circle if all observations there are obscured, else teardrop.
+        Object.keys(byCoord).forEach(key => {
+          const group = byCoord[key];
+          const latNum = group[0].latObs;
+          const lngNum = group[0].lngObs;
+          const isObscured = group.every(g => g.isObscuredPoint);
+          const layer = isObscured
+            ? L.circleMarker([latNum, lngNum], obscuredCircleOptions)
+            : L.marker([latNum, lngNum], { icon: smallPinIcon });
+          layer._observationCount = group.length;
+          if (group.length === 1) {
+            layer.bindPopup(observationPopupContent(group[0].obs, viewerPrefs));
+          } else {
+            layer._popupId = 'obs-' + (++popupIdCounter);
+            popupMarkerRegistry[layer._popupId] = layer;
+            layer._obsList = group;
+            layer._currentIndex = 0;
+            layer._viewerPrefs = viewerPrefs;
+            layer.bindPopup(buildGroupPopupHtml(layer));
+          }
+          clusterGroup.addLayer(layer);
+        });
+        clusterGroup.addTo(MAP);
+        observationLayer = clusterGroup;
+        if (plotted > 0 && boundsLatLngs.length > 0) {
+          try {
+            const bounds = L.latLngBounds(boundsLatLngs);
+            if (bounds.isValid()) MAP.fitBounds(bounds, { padding: [20, 20], maxZoom: 18 });
+          } catch (e) { /* ignore bounds error */ }
+        }
+        setStatus(plotted === 0
+          ? `No coordinates in response (${observations.length} obs). Try without token to see public obscured coords.`
+          : `Plotted ${plotted} of ${observations.length} observation(s)${privateCount > 0 ? ` (${privateCount} with true private/obscured location)` : ''}.`);
+      } catch (err) {
+        if (err.message === 'RATE_LIMIT_CANCELLED') {
+          setStatus('Search cancelled.');
+        } else {
+          setStatus('Network error: ' + err.message, true);
+        }
+      }
+    });
+
+    // ========== Clear map and search state ==========
+    clearBtn.addEventListener('click', () => {
+      if (observationLayer) {
+        MAP.removeLayer(observationLayer);
+        observationLayer = null;
+      }
+      if (searchAreaRect) {
+        MAP.removeLayer(searchAreaRect);
+        searchAreaRect = null;
+      }
+      searchBounds = null;
+      setStatus('');
+    });
+
+    // ========== Popups: escape API content to avoid XSS ==========
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function observationPopupContent(obs, viewerPrefs) {
+      const taxon = obs.taxon;
+      const scientific = taxon?.name;
+      const common = taxon?.preferred_common_name;
+      let displayName;
+      if (viewerPrefs.prefers_scientific_name_first && viewerPrefs.prefers_common_names && scientific && common) {
+        displayName = scientific + ' (' + common + ')';
+      } else if (viewerPrefs.prefers_scientific_name_first) {
+        displayName = scientific || common || 'Unknown';
+      } else if (viewerPrefs.prefers_common_names && common) {
+        displayName = common;
+      } else {
+        displayName = scientific || common || 'Unknown';
+      }
+      const user = obs.user?.login || '—';
+      const date = obs.observed_on ? new Date(obs.observed_on).toLocaleDateString() : '—';
+      const gradeRaw = obs.quality_grade;
+      const grade = gradeRaw === 'research' ? 'Research Grade' : gradeRaw === 'needs_id' ? 'Needs ID' : gradeRaw === 'casual' ? 'Casual' : (gradeRaw || '—');
+      const thumbUrl = obs.photos?.[0]?.url;
+      const thumbHtml = thumbUrl
+        ? `<img src="${escapeHtml(thumbUrl)}" alt="" class="popup-thumb" loading="lazy">`
+        : '';
+      return `${thumbHtml}
+             <div class="popup-title">${escapeHtml(displayName)}</div>
+             <div class="popup-meta">Observer: ${escapeHtml(user)} · ${date} · ${grade}</div>
+             <div class="popup-meta"><a href="https://www.inaturalist.org/observations/${obs.id}" target="_blank">View on iNaturalist</a></div>`;
+    }
+
+    function buildGroupPopupHtml(marker) {
+      const list = marker._obsList;
+      const i = marker._currentIndex;
+      const n = list.length;
+      const obs = list[i].obs;
+      const body = observationPopupContent(obs, marker._viewerPrefs);
+      const prevDisabled = n <= 1 ? ' disabled' : '';
+      const nextDisabled = n <= 1 ? ' disabled' : '';
+      const id = marker._popupId || '';
+      return `<div class="popup-multi-obs" data-marker-id="${escapeHtml(id)}"><div class="popup-nav">
+        <button type="button" class="popup-prev"${prevDisabled}>‹ Prev</button>
+        <span>${i + 1} of ${n} observation${n !== 1 ? 's' : ''}</span>
+        <button type="button" class="popup-next"${nextDisabled}>Next ›</button>
+      </div>${body}</div>`;
+    }
+
+    document.addEventListener('click', function (e) {
+      const prev = e.target.closest('.popup-prev');
+      const next = e.target.closest('.popup-next');
+      if (!prev && !next) return;
+      const wrapper = e.target.closest('.popup-multi-obs');
+      if (!wrapper) return;
+      const id = wrapper.getAttribute('data-marker-id');
+      if (!id) return;
+      const marker = window._popupMarkerRegistry && window._popupMarkerRegistry[id];
+      if (!marker || !marker._obsList) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (prev && !prev.disabled) {
+        marker._currentIndex = (marker._currentIndex - 1 + marker._obsList.length) % marker._obsList.length;
+      } else if (next && !next.disabled) {
+        marker._currentIndex = (marker._currentIndex + 1) % marker._obsList.length;
+      } else return;
+      marker.getPopup().setContent(buildGroupPopupHtml(marker));
+    });
+    }
+  </script>
+</body>
+</html>
