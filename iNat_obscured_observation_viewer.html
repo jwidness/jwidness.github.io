@@ -19,6 +19,8 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: system-ui, sans-serif; }
     #map { height: 100vh; width: 100%; }
+    #map.draw-mode,
+    #map.draw-mode.leaflet-container { cursor: crosshair !important; }
     .panel {
       position: absolute;
       top: 12px;
@@ -77,6 +79,7 @@
     .panel p { margin: 0 0 10px 0; color: #444; font-size: 0.9rem; }
     .panel label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 0.85rem; }
     .panel .checkbox-label { display: flex; align-items: center; gap: 8px; font-weight: normal; margin-bottom: 8px; }
+    .panel .checkbox-label .label-tip { cursor: help; color: #666; font-size: 0.9em; }
     .panel .checkbox-label input { width: auto; margin: 0; }
     .panel input, .panel button, .panel textarea { width: 100%; padding: 8px 10px; margin-bottom: 8px; }
     .panel button {
@@ -97,6 +100,10 @@
     .panel button.authorized:hover { background: #999; }
     .token-link { font-size: 0.85rem; }
     .token-link a { color: #74ac00; }
+    .panel .explore-link { display: inline-block; margin-right: 12px; margin-bottom: 8px; font-size: 0.9rem; color: #0066cc; }
+    .panel .explore-link:hover { text-decoration: underline; }
+    .panel .explore-link.disabled { color: #999; cursor: default; pointer-events: none; text-decoration: none; }
+    .panel .inat-links-intro { margin: 8px 0 4px 0; font-size: 0.9rem; color: #444; }
     .status { font-size: 0.85rem; color: #666; margin-top: 6px; }
     .status.error { color: #c00; }
     .status.status-fetching {
@@ -106,7 +113,7 @@
       flex-wrap: wrap;
       gap: 6px;
     }
-    .status .fetching-dots { display: inline-flex; font-size: 1.25em; }
+    .status .fetching-dots { display: inline-flex; font-size: 2.0em; vertical-align: middle; align-items: center; line-height: 1; transform: translateY(-0.15em); }
     .status .fetching-dots .dot {
       animation: fetching-dot 1.4s ease-in-out infinite both;
     }
@@ -127,6 +134,15 @@
     .popup-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 0.85rem; color: #555; }
     .popup-nav button { padding: 2px 8px; cursor: pointer; background: #e8e8e8; border: 1px solid #bbb; border-radius: 4px; font-size: 0.85rem; }
     .popup-nav button:hover { background: #ddd; }
+    .search-box-clear-btn {
+      display: flex; align-items: center; justify-content: center;
+      width: 22px; height: 22px;
+      background: #d35400; color: #fff; border: 2px solid #fff;
+      border-radius: 50%; font-size: 14px; font-weight: bold; line-height: 1;
+      cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+    .search-box-clear-btn:hover { background: #e65c00; }
+    .search-box-clear-btn-wrap.leaflet-marker-icon { background: transparent !important; border: none !important; }
   </style>
 </head>
 <body>
@@ -139,24 +155,33 @@
       </div>
       <div id="authPrompt" class="auth-prompt">
         <p>To see <strong>true coordinates</strong> when you have permission (your observations, users who trust you, projects that trust you), authorize with iNaturalist below. Without authorization obscured coordinates remain obscured.</p>
-        <p class="limit-msg">Search is limited to 10,000 observations.</p>
         <button type="button" id="authorize">Authorize with iNaturalist</button>
       </div>
       <p id="authAs" class="auth-as" style="display: none;" aria-live="polite"></p>
-      <p class="instructions">Draw a search area and/or enter <a href="https://forum.inaturalist.org/t/how-to-use-inaturalists-search-urls-wiki-part-1-of-2/63" target="_blank" rel="noopener noreferrer">query parameters</a>, then Search observations.</p>
-      <button type="button" id="drawArea" class="draw-btn">Draw search area ✏️</button>
+      <p class="instructions">Draw a search box and/or enter <a href="https://forum.inaturalist.org/t/how-to-use-inaturalists-search-urls-wiki-part-1-of-2/63" target="_blank" rel="noopener noreferrer">query parameters</a>, then Search observations.</p>
+      <p class="limit-msg">Search is capped at 10,000 observations due to iNaturalist API limitations.</p>
+      <button type="button" id="drawArea" class="draw-btn">Draw search box ✏️</button>
       <label for="extraParams">Query parameters</label>
-      <textarea id="extraParams" rows="2" placeholder="e.g. place_id=12345&amp;taxon_id=1&amp;user_id=tiwane"></textarea>
-      <label class="checkbox-label"><input type="checkbox" id="obscuredOnly"> Only obscured/private observations</label>
+      <textarea id="extraParams" rows="2" placeholder="e.g. place_id=1&amp;taxon_id=1&amp;user_id=tiwane"></textarea>
+      <label class="checkbox-label"><input type="checkbox" id="obscuredOnly"> Only obscured/private observations <span class="label-tip" title="Due to limitations of the iNaturalist API, private observations can only be returned from global searches or searches limited by place_id. Bounding box searches will omit them.">ⓘ</span></label>
       <button type="button" id="search">Search observations</button>
       <p class="status" id="status" aria-live="polite"></p>
-      <button type="button" id="clear" class="secondary">Clear map</button>
+      <p class="inat-links-intro">Apply parameters to: <span class="label-tip" title="Some parameters are invalid on some iNat pages">ⓘ</span></p>
+      <a id="exploreLink" href="#" target="_blank" rel="noopener noreferrer" class="explore-link">Explore</a>
+      <a id="identifyLink" href="#" target="_blank" rel="noopener noreferrer" class="explore-link">Identify</a>
+      <a id="exportLink" href="#" target="_blank" rel="noopener noreferrer" class="explore-link">Export</a>
       </div>
     </div>
     <button type="button" class="panel-tab" id="panelToggle" title="Collapse panel" aria-label="Collapse panel">^</button>
   </div>
 
   <script>
+    // ========== Overview ==========
+    // This script: (1) Handles OAuth callback if ?code&state in URL, else (2) runs the main app.
+    // Main app: Leaflet map, draw search box, query params, rate-limited fetch from iNaturalist API,
+    // plot observations (teardrop = true coords, circle = obscured), popups with taxon/user/grade,
+    // and links to apply current params to iNat Explore / Identify / Export.
+
     // ========== PKCE OAuth helpers ==========
     // Adapted from https://github.com/jumear/stirfry and https://github.com/aaronpk/pkce-vanilla-js
     function generateRandomString() {
@@ -195,8 +220,6 @@
 
     // OAuth: for GitHub Pages. Redirect URI must match this page URL; add it at inaturalist.org/oauth/applications.
     const OAUTH_CLIENT_ID = '42G05z5o2vC8cgvTiTRhMvnhY2VzMsD0d7kKpIAobbM'; // OAuth app #962
-    // const OAUTH_REDIRECT_URI = 'http://localhost:8080/iNat_obscured_observation_viewer.html';
-    // const OAUTH_REDIRECT_URI = window.location.origin + window.location.pathname;
     const OAUTH_REDIRECT_URI = 'https://jwidness.github.io/iNat_obscured_observation_viewer.html';
 
     // ========== OAuth callback: exchange code for JWT ==========
@@ -254,10 +277,25 @@
 
     let observationLayer = null;
     let searchBounds = null;
-    let searchAreaRect = null;
+    let searchAreaLayer = null;
+    let hasSearchedOnce = false;
     let drawStart = null;
     let drawRect = null;
     let mapMode = 'pan';
+
+    /** Clamp lat/lng bounds to valid ranges. Returns { swlat, swlng, nelat, nelng }. */
+    function clampLatLngBounds(bounds) {
+      const sw = bounds.getSouthWest();
+      const ne = bounds.getNorthEast();
+      const clampLat = (v) => Math.max(-90, Math.min(90, v));
+      const clampLng = (v) => Math.max(-180, Math.min(180, v));
+      return {
+        swlat: clampLat(sw.lat),
+        swlng: clampLng(sw.lng),
+        nelat: clampLat(ne.lat),
+        nelng: clampLng(ne.lng)
+      };
+    }
 
     // ========== Client-side rate limiting ==========
     // Stay under iNaturalist API limits by spacing requests (count per minute).
@@ -302,7 +340,9 @@
     const obscuredOnlyEl = document.getElementById('obscuredOnly');
     const statusEl = document.getElementById('status');
     const searchBtn = document.getElementById('search');
-    const clearBtn = document.getElementById('clear');
+    const exploreLinkEl = document.getElementById('exploreLink');
+    const identifyLinkEl = document.getElementById('identifyLink');
+    const exportLinkEl = document.getElementById('exportLink');
     const drawAreaBtn = document.getElementById('drawArea');
     const panelEl = document.getElementById('panel');
     const panelToggleBtn = document.getElementById('panelToggle');
@@ -317,17 +357,22 @@
 
     function setMapMode(mode) {
       mapMode = mode;
+      const mapEl = document.getElementById('map');
+      if (mode === 'draw') mapEl.classList.add('draw-mode');
+      else mapEl.classList.remove('draw-mode');
       drawAreaBtn.classList.toggle('mode-active', mode === 'draw');
-      if (mode === 'draw') {
-        statusEl.textContent = '';
-        statusEl.classList.remove('error');
-      } else {
-        statusEl.textContent = '';
-      }
+      statusEl.textContent = '';
+      statusEl.classList.remove('error');
     }
     drawAreaBtn.addEventListener('click', () => setMapMode('draw'));
 
     // ========== Auth UI: show "Authorize" vs "Authorized as <user>" ==========
+    const EXTRA_PARAMS_PLACEHOLDER_UNAUTH = 'e.g. place_id=1&taxon_id=1&user_id=tiwane';
+    function setExtraParamsPlaceholder(login) {
+      extraParamsEl.placeholder = login
+        ? 'e.g. place_id=1&taxon_id=1&user_id=' + login
+        : EXTRA_PARAMS_PLACEHOLDER_UNAUTH;
+    }
     function updateAuthorizeButtonState() {
       const hasToken = !!sessionStorage.getItem(TOKEN_KEY);
       const authPrompt = document.getElementById('authPrompt');
@@ -338,6 +383,7 @@
         if (!authAs.dataset.fetched) {
           authAs.dataset.fetched = '1';
           authAs.textContent = 'Authorized…';
+          setExtraParamsPlaceholder(null);
           const headers = { 'Accept': 'application/json', 'Authorization': sessionStorage.getItem(TOKEN_KEY) };
           fetch('https://api.inaturalist.org/v2/users/me?fields=(login:!t)', { headers })
             .then(r => r.ok ? r.json() : null)
@@ -345,15 +391,21 @@
               const me = data && (data.results?.[0] ?? data);
               const login = (me && me.login) ? me.login : '—';
               authAs.textContent = 'Authorized as ' + login;
+              setExtraParamsPlaceholder(login === '—' ? null : login);
             })
             .catch(() => { authAs.textContent = 'Authorized'; });
         }
       } else {
         authPrompt.style.display = 'block';
         authAs.style.display = 'none';
+        setExtraParamsPlaceholder(null);
       }
     }
     updateAuthorizeButtonState();
+    updateExploreLink();
+    extraParamsEl.addEventListener('input', updateExploreLink);
+    extraParamsEl.addEventListener('change', updateExploreLink);
+    if (obscuredOnlyEl) obscuredOnlyEl.addEventListener('change', updateExploreLink);
 
     // Start PKCE flow and redirect to iNaturalist authorize page.
     authorizeBtn.addEventListener('click', async () => {
@@ -416,28 +468,49 @@
       }
       const bounds = drawRect.getBounds();
       MAP.dragging.enable();
-      if (bounds.getSouthWest().distanceTo(bounds.getNorthEast()) < 5000) {
-        MAP.removeLayer(drawRect);
-        drawRect = null;
-        drawStart = null;
-        setStatus('Draw a larger area (drag further).', true);
-        setMapMode('pan');
-        return;
-      }
       searchBounds = bounds;
       MAP.removeLayer(drawRect);
       drawRect = null;
       drawStart = null;
-      if (searchAreaRect) MAP.removeLayer(searchAreaRect);
-      searchAreaRect = L.rectangle(searchBounds, {
+      if (searchAreaLayer) MAP.removeLayer(searchAreaLayer);
+      const rect = L.rectangle(searchBounds, {
         color: '#d35400',
         weight: 2,
         fillOpacity: 0
-      }).addTo(MAP);
+      });
+      const ne = searchBounds.getNorthEast();
+      const clearIcon = L.divIcon({
+        className: 'search-box-clear-btn-wrap',
+        html: '<span class="search-box-clear-btn" title="Clear search area" aria-label="Clear search area">×</span>',
+        iconSize: [22, 22],
+        iconAnchor: [11, 11]
+      });
+      const clearMarker = L.marker(ne, { icon: clearIcon });
+      clearMarker.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        clearSearchArea();
+      });
+      searchAreaLayer = L.layerGroup([rect, clearMarker]).addTo(MAP);
       statusEl.textContent = 'Search area set. Click Search observations.';
       statusEl.classList.remove('error');
       setMapMode('pan');
+      updateExploreLink();
     });
+
+    /** Remove search area rectangle, clear bounds and observations, update status and iNat links. */
+    function clearSearchArea() {
+      if (searchAreaLayer) {
+        MAP.removeLayer(searchAreaLayer);
+        searchAreaLayer = null;
+      }
+      searchBounds = null;
+      if (observationLayer) {
+        MAP.removeLayer(observationLayer);
+        observationLayer = null;
+      }
+      setStatus('');
+      updateExploreLink();
+    }
 
     function setStatus(msg, isError) {
       statusEl.textContent = msg;
@@ -445,7 +518,63 @@
       statusEl.classList.toggle('error', !!isError);
     }
 
+    /** Update Explore / Identify / Export links. Enabled only when hasSearchedOnce and (searchBounds or query params). */
+    function updateExploreLink() {
+      const params = new URLSearchParams();
+      if (searchBounds) {
+        const b = clampLatLngBounds(searchBounds);
+        params.set('swlat', String(b.swlat));
+        params.set('swlng', String(b.swlng));
+        params.set('nelat', String(b.nelat));
+        params.set('nelng', String(b.nelng));
+      }
+      const extra = (extraParamsEl.value || '').trim();
+      if (extra) {
+        try {
+          const parsed = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
+          parsed.forEach((value, key) => params.set(key, value));
+        } catch (e) {
+          exploreLinkEl.href = '#';
+          exploreLinkEl.classList.add('disabled');
+          exploreLinkEl.setAttribute('aria-disabled', 'true');
+          identifyLinkEl.href = '#';
+          identifyLinkEl.classList.add('disabled');
+          identifyLinkEl.setAttribute('aria-disabled', 'true');
+          exportLinkEl.href = '#';
+          exportLinkEl.classList.add('disabled');
+          exportLinkEl.setAttribute('aria-disabled', 'true');
+          return;
+        }
+      }
+      const hasMeaningfulParams = searchBounds || extra;
+      const enableLinks = hasMeaningfulParams && hasSearchedOnce;
+      if (!enableLinks) {
+        exploreLinkEl.href = '#';
+        exploreLinkEl.classList.add('disabled');
+        exploreLinkEl.setAttribute('aria-disabled', 'true');
+        identifyLinkEl.href = '#';
+        identifyLinkEl.classList.add('disabled');
+        identifyLinkEl.setAttribute('aria-disabled', 'true');
+        exportLinkEl.href = '#';
+        exportLinkEl.classList.add('disabled');
+        exportLinkEl.setAttribute('aria-disabled', 'true');
+        return;
+      }
+      if (obscuredOnlyEl && obscuredOnlyEl.checked) params.set('obscuration', 'obscured,private');
+      const queryString = params.toString();
+      exploreLinkEl.href = 'https://www.inaturalist.org/observations?' + queryString;
+      exploreLinkEl.classList.remove('disabled');
+      exploreLinkEl.removeAttribute('aria-disabled');
+      identifyLinkEl.href = 'https://www.inaturalist.org/observations/identify?' + queryString;
+      identifyLinkEl.classList.remove('disabled');
+      identifyLinkEl.removeAttribute('aria-disabled');
+      exportLinkEl.href = 'https://www.inaturalist.org/observations/export?' + queryString;
+      exportLinkEl.classList.remove('disabled');
+      exportLinkEl.removeAttribute('aria-disabled');
+    }
+
     // ========== Search: build params, check count, fetch pages, plot ==========
+    // Fetches up to MAX_RESULTS (10,000); if API returns more, we cap pages and show a warning.
     searchBtn.addEventListener('click', async () => {
       const token = sessionStorage.getItem(TOKEN_KEY) || '';
       const extra = (extraParamsEl.value || '').trim();
@@ -456,6 +585,8 @@
 
       cancelSearchRequested = false;
       setStatus('Loading…');
+      hasSearchedOnce = true;
+      updateExploreLink();
       if (observationLayer) {
         MAP.removeLayer(observationLayer);
         observationLayer = null;
@@ -497,12 +628,11 @@
         locale: viewerPrefs.locale
       });
       if (searchBounds) {
-        const sw = searchBounds.getSouthWest();
-        const ne = searchBounds.getNorthEast();
-        params.set('swlat', String(sw.lat));
-        params.set('swlng', String(sw.lng));
-        params.set('nelat', String(ne.lat));
-        params.set('nelng', String(ne.lng));
+        const b = clampLatLngBounds(searchBounds);
+        params.set('swlat', String(b.swlat));
+        params.set('swlng', String(b.swlng));
+        params.set('nelat', String(b.nelat));
+        params.set('nelng', String(b.nelng));
       }
       if (viewerPrefs.preferred_place_id) params.set('preferred_place_id', String(viewerPrefs.preferred_place_id));
       if (obscuredOnlyEl && obscuredOnlyEl.checked) params.set('obscuration', 'obscured,private');
@@ -527,17 +657,14 @@
         }
         const checkData = await checkRes.json();
         const totalResults = checkData.total_results ?? 0;
-        if (totalResults > MAX_RESULTS) {
-          setStatus('This search has over 10,000 results. Please draw a smaller area or add query parameters (e.g. taxon_id, place_id, user_id, quality_grade) to narrow the search.', true);
-          return;
-        }
+        const searchExceededLimit = totalResults > MAX_RESULTS;
 
         params.set('per_page', String(PER_PAGE));
-        const totalPages = Math.ceil(totalResults / PER_PAGE) || 1;
+        const totalPages = Math.min(Math.ceil(totalResults / PER_PAGE) || 1, Math.ceil(MAX_RESULTS / PER_PAGE));
         const allObservations = [];
-        const perPage = parseInt(params.get('per_page') || '200', 10) || 200;
         const BATCH_SIZE = 10; // fetch up to 10 pages in parallel per batch
         cancelSearchRequested = false;
+        const displayTotal = searchExceededLimit ? MAX_RESULTS : totalResults;
 
         function setFetchStatus(retrieved, total) {
           const t = (total ?? 0);
@@ -546,7 +673,7 @@
           statusEl.classList.remove('error');
           statusEl.classList.add('status-fetching');
         }
-        setFetchStatus(0, totalResults);
+        setFetchStatus(0, displayTotal);
 
         batch: for (let batchStart = 1; batchStart <= totalPages; batchStart += BATCH_SIZE) {
           if (cancelSearchRequested) {
@@ -576,10 +703,10 @@
           for (const data of batchResults) {
             const results = data.results || [];
             allObservations.push(...results);
-            setFetchStatus(allObservations.length, totalResults);
-            if (results.length < perPage) break batch;
+            setFetchStatus(allObservations.length, displayTotal);
+            if (results.length < PER_PAGE) break batch;
           }
-          if (batchResults.some(d => (d.results || []).length < perPage)) break;
+          if (batchResults.some(d => (d.results || []).length < PER_PAGE)) break;
         }
 
         if (cancelSearchRequested) {
@@ -593,7 +720,7 @@
           return;
         }
 
-        setFetchStatus(observations.length, totalResults);
+        setFetchStatus(observations.length, displayTotal);
         await new Promise(r => setTimeout(r, 0));
 
         const clusterGroup = L.markerClusterGroup({
@@ -689,12 +816,14 @@
         if (plotted > 0 && boundsLatLngs.length > 0) {
           try {
             const bounds = L.latLngBounds(boundsLatLngs);
-            if (bounds.isValid()) MAP.fitBounds(bounds, { padding: [20, 20], maxZoom: 18 });
+            if (bounds.isValid()) MAP.fitBounds(bounds, { padding: [20, 20], maxZoom: 16 });
           } catch (e) { /* ignore bounds error */ }
         }
         setStatus(plotted === 0
           ? `No coordinates in response (${observations.length} obs). Try without token to see public obscured coords.`
-          : `Plotted ${plotted} of ${observations.length} observation(s)${privateCount > 0 ? ` (${privateCount} with true private/obscured location)` : ''}.`);
+          : searchExceededLimit
+            ? `Search had ${totalResults.toLocaleString()} results, retrieving only the first 10,000. Please draw a smaller area or add query parameters (e.g. taxon_id, place_id, user_id, quality_grade) to narrow the search. Plotted ${plotted} of ${observations.length} observation(s)${privateCount > 0 ? ` (${privateCount} with true private/obscured location)` : ''}.`
+            : `Plotted ${plotted} of ${observations.length} observation(s)${privateCount > 0 ? ` (${privateCount} with true private/obscured location)` : ''}.`);
       } catch (err) {
         if (err.message === 'RATE_LIMIT_CANCELLED') {
           setStatus('Search cancelled.');
@@ -702,20 +831,6 @@
           setStatus('Network error: ' + err.message, true);
         }
       }
-    });
-
-    // ========== Clear map and search state ==========
-    clearBtn.addEventListener('click', () => {
-      if (observationLayer) {
-        MAP.removeLayer(observationLayer);
-        observationLayer = null;
-      }
-      if (searchAreaRect) {
-        MAP.removeLayer(searchAreaRect);
-        searchAreaRect = null;
-      }
-      searchBounds = null;
-      setStatus('');
     });
 
     // ========== Popups: escape API content to avoid XSS ==========
