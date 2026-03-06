@@ -709,8 +709,8 @@
       if (obscurationVal) params.set('obscuration', obscurationVal);
       if (exportObscurationNoteEl) {
         exportObscurationNoteEl.textContent = hasObscurationFilter()
-          ? "Different iNaturalist pages support different parameters, for example, the obscuration filter isn't available on Export. Results may differ."
-          : "Different iNaturalist pages support different parameters; results may differ.";
+          ? "⚠️ Different iNaturalist pages support different parameters, for example, the obscuration filter isn't available on Export. Results may differ."
+          : "⚠️ Different iNaturalist pages support different parameters; results may differ.";
         exportObscurationNoteEl.style.display = 'block';
       }
 
