@@ -143,6 +143,11 @@
     }
     .search-box-clear-btn:hover { background: #e65c00; }
     .search-box-clear-btn-wrap.leaflet-marker-icon { background: transparent !important; border: none !important; }
+    .obscuration-label { margin: 0 0 4px 0; font-size: 0.85rem; color: #444; }
+    .obscuration-checkboxes { margin-bottom: 8px; }
+    .obscuration-checkboxes .checkbox-label { margin-bottom: 4px; }
+    .obscuration-replaced-msg { font-size: 0.85rem; color: #c00; margin: 0 0 8px 0; min-height: 0; }
+    .export-obscuration-note { font-size: 0.85rem; color: #666; display: block; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -163,13 +168,20 @@
       <button type="button" id="drawArea" class="draw-btn">Draw search box ✏️</button>
       <label for="extraParams">Query parameters</label>
       <textarea id="extraParams" rows="2" placeholder="e.g. place_id=1&amp;taxon_id=1&amp;user_id=tiwane"></textarea>
-      <label class="checkbox-label"><input type="checkbox" id="obscuredOnly"> Only obscured/private observations <span class="label-tip" title="Due to limitations of the iNaturalist API, private observations can only be returned from global searches or searches limited by place_id. Bounding box searches will omit them.">ⓘ</span></label>
+      <p class="obscuration-label">Include these location types (leave all unchecked for no filter):</p>
+      <div class="obscuration-checkboxes">
+        <label class="checkbox-label"><input type="checkbox" id="obscurationOpen"> Open (No obscuration)</label>
+        <label class="checkbox-label"><input type="checkbox" id="obscurationObscured"> Obscured <span class="label-tip" title="Due to limitations of the iNaturalist API, bounding box searches for obscured observations must enclose the public location.">ⓘ</span></label>
+        <label class="checkbox-label"><input type="checkbox" id="obscurationPrivate"> Private <span class="label-tip" title="Due to limitations of the iNaturalist API, private observations can only be returned from global searches or searches limited by place_id. Bounding box searches will omit them.">ⓘ</span></label>
+      </div>
+      <p class="obscuration-replaced-msg" id="obscurationReplacedMsg" aria-live="polite"></p>
       <button type="button" id="search">Search observations</button>
       <p class="status" id="status" aria-live="polite"></p>
-      <p class="inat-links-intro">Apply parameters to: <span class="label-tip" title="Some parameters are invalid on some iNat pages">ⓘ</span></p>
+      <p class="inat-links-intro">Apply parameters to:</p>
       <a id="exploreLink" href="#" target="_blank" rel="noopener noreferrer" class="explore-link">Explore</a>
       <a id="identifyLink" href="#" target="_blank" rel="noopener noreferrer" class="explore-link">Identify</a>
       <a id="exportLink" href="#" target="_blank" rel="noopener noreferrer" class="explore-link">Export</a>
+      <span id="exportObscurationNote" class="export-obscuration-note" style="display: none;"></span>
       </div>
     </div>
     <button type="button" class="panel-tab" id="panelToggle" title="Collapse panel" aria-label="Collapse panel">^</button>
@@ -337,15 +349,81 @@
     // ========== DOM refs and panel behavior ==========
     const authorizeBtn = document.getElementById('authorize');
     const extraParamsEl = document.getElementById('extraParams');
-    const obscuredOnlyEl = document.getElementById('obscuredOnly');
+    const obscurationOpenEl = document.getElementById('obscurationOpen');
+    const obscurationObscuredEl = document.getElementById('obscurationObscured');
+    const obscurationPrivateEl = document.getElementById('obscurationPrivate');
+    const obscurationReplacedMsgEl = document.getElementById('obscurationReplacedMsg');
     const statusEl = document.getElementById('status');
     const searchBtn = document.getElementById('search');
     const exploreLinkEl = document.getElementById('exploreLink');
     const identifyLinkEl = document.getElementById('identifyLink');
     const exportLinkEl = document.getElementById('exportLink');
+    const exportObscurationNoteEl = document.getElementById('exportObscurationNote');
     const drawAreaBtn = document.getElementById('drawArea');
     const panelEl = document.getElementById('panel');
     const panelToggleBtn = document.getElementById('panelToggle');
+
+    /** Get obscuration param value from the three checkboxes: '' if none checked, else e.g. 'none', 'obscured,private', 'none,obscured,private'. */
+    function getObscurationValue() {
+      const parts = [];
+      if (obscurationOpenEl && obscurationOpenEl.checked) parts.push('none');
+      if (obscurationObscuredEl && obscurationObscuredEl.checked) parts.push('obscured');
+      if (obscurationPrivateEl && obscurationPrivateEl.checked) parts.push('private');
+      return parts.length ? parts.join(',') : '';
+    }
+
+    /** Returns true if any obscuration checkbox is checked. */
+    function hasObscurationFilter() {
+      return getObscurationValue().length > 0;
+    }
+
+    /** Sync checkboxes to the query-params textarea: set or remove obscuration. Checkboxes are the source of truth; we always overwrite obscuration in the box when they change. */
+    function syncObscurationToTextarea() {
+      const extra = (extraParamsEl.value || '').trim();
+      const newValue = getObscurationValue();
+      if (extra) {
+        try {
+          const parsed = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
+          parsed.delete('obscuration');
+          if (newValue) parsed.set('obscuration', newValue);
+          let str = parsed.toString();
+          if (str && newValue) {
+            str = str.replace(/obscuration=([^&]+)/g, (_, v) => 'obscuration=' + decodeURIComponent(v));
+          }
+          extraParamsEl.value = str ? (extra.startsWith('?') ? '?' + str : str) : '';
+        } catch (e) {
+          return;
+        }
+      } else if (newValue) {
+        extraParamsEl.value = 'obscuration=' + newValue;
+      }
+      if (obscurationReplacedMsgEl) {
+        obscurationReplacedMsgEl.textContent = '';
+        obscurationReplacedMsgEl.style.display = 'none';
+      }
+    }
+
+    /** Update the three obscuration checkboxes from a param value string (e.g. "none", "obscured,private"). */
+    function setObscurationCheckboxesFromValue(value) {
+      const parts = (value || '').split(',').map(p => p.trim()).filter(Boolean);
+      if (obscurationOpenEl) obscurationOpenEl.checked = parts.includes('none');
+      if (obscurationObscuredEl) obscurationObscuredEl.checked = parts.includes('obscured');
+      if (obscurationPrivateEl) obscurationPrivateEl.checked = parts.includes('private');
+    }
+
+    /** If the textarea's obscuration differs from the checkboxes, update the checkboxes to match the textarea (so typing in the box syncs to checkboxes). */
+    function syncObscurationFromTextarea() {
+      const extra = (extraParamsEl.value || '').trim();
+      if (!extra) return;
+      try {
+        const parsed = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
+        const fromBox = (parsed.get('obscuration') || '').split(',').map(p => p.trim()).filter(Boolean).sort().join(',');
+        const fromCheckboxes = getObscurationValue().split(',').filter(Boolean).sort().join(',');
+        if (fromBox !== fromCheckboxes) {
+          setObscurationCheckboxesFromValue(parsed.get('obscuration') || '');
+        }
+      } catch (e) { /* ignore parse errors */ }
+    }
 
     panelToggleBtn.addEventListener('click', () => {
       panelEl.classList.toggle('collapsed');
@@ -403,9 +481,21 @@
     }
     updateAuthorizeButtonState();
     updateExploreLink();
-    extraParamsEl.addEventListener('input', updateExploreLink);
-    extraParamsEl.addEventListener('change', updateExploreLink);
-    if (obscuredOnlyEl) obscuredOnlyEl.addEventListener('change', updateExploreLink);
+    extraParamsEl.addEventListener('input', () => {
+      syncObscurationFromTextarea();
+      updateExploreLink();
+    });
+    extraParamsEl.addEventListener('change', () => {
+      syncObscurationFromTextarea();
+      updateExploreLink();
+    });
+    function onObscurationChange() {
+      syncObscurationToTextarea();
+      updateExploreLink();
+    }
+    if (obscurationOpenEl) obscurationOpenEl.addEventListener('change', onObscurationChange);
+    if (obscurationObscuredEl) obscurationObscuredEl.addEventListener('change', onObscurationChange);
+    if (obscurationPrivateEl) obscurationPrivateEl.addEventListener('change', onObscurationChange);
 
     // Start PKCE flow and redirect to iNaturalist authorize page.
     authorizeBtn.addEventListener('click', async () => {
@@ -532,7 +622,9 @@
       if (extra) {
         try {
           const parsed = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
-          parsed.forEach((value, key) => params.set(key, value));
+          parsed.forEach((value, key) => {
+            if (key !== 'obscuration') params.set(key, value);
+          });
         } catch (e) {
           exploreLinkEl.href = '#';
           exploreLinkEl.classList.add('disabled');
@@ -546,7 +638,15 @@
           return;
         }
       }
-      const hasMeaningfulParams = searchBounds || extra;
+      const hasExtraBeyondObscuration = (() => {
+        if (!extra) return false;
+        try {
+          const p = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
+          p.delete('obscuration');
+          return p.toString().trim() !== '';
+        } catch (e) { return true; }
+      })();
+      const hasMeaningfulParams = searchBounds || hasExtraBeyondObscuration;
       const enableLinks = hasMeaningfulParams && hasSearchedOnce;
       if (!enableLinks) {
         exploreLinkEl.href = '#';
@@ -558,17 +658,35 @@
         exportLinkEl.href = '#';
         exportLinkEl.classList.add('disabled');
         exportLinkEl.setAttribute('aria-disabled', 'true');
+        if (exportObscurationNoteEl) {
+          exportObscurationNoteEl.textContent = '';
+          exportObscurationNoteEl.style.display = 'none';
+        }
         return;
       }
-      if (obscuredOnlyEl && obscuredOnlyEl.checked) params.set('obscuration', 'obscured,private');
-      const queryString = params.toString();
-      exploreLinkEl.href = 'https://www.inaturalist.org/observations?' + queryString;
+      const obscurationVal = getObscurationValue();
+      if (obscurationVal) params.set('obscuration', obscurationVal);
+      if (exportObscurationNoteEl) {
+        exportObscurationNoteEl.textContent = hasObscurationFilter()
+          ? "Different iNaturalist pages support different parameters, for example, the obscuration filter isn't available on Export. Results may differ."
+          : "Different iNaturalist pages support different parameters; results may differ.";
+        exportObscurationNoteEl.style.display = 'block';
+      }
+
+      const exploreParams = new URLSearchParams(params);
+      if (!exploreParams.has('verifiable')) exploreParams.set('verifiable', 'any');
+
+      const identifyParams = new URLSearchParams(params);
+      if (!identifyParams.has('quality_grade')) identifyParams.set('quality_grade', 'needs_id,research,casual');
+      if (!identifyParams.has('reviewed')) identifyParams.set('reviewed', 'any');
+
+      exploreLinkEl.href = 'https://www.inaturalist.org/observations?' + exploreParams.toString();
       exploreLinkEl.classList.remove('disabled');
       exploreLinkEl.removeAttribute('aria-disabled');
-      identifyLinkEl.href = 'https://www.inaturalist.org/observations/identify?' + queryString;
+      identifyLinkEl.href = 'https://www.inaturalist.org/observations/identify?' + identifyParams.toString();
       identifyLinkEl.classList.remove('disabled');
       identifyLinkEl.removeAttribute('aria-disabled');
-      exportLinkEl.href = 'https://www.inaturalist.org/observations/export?' + queryString;
+      exportLinkEl.href = 'https://www.inaturalist.org/observations/export?' + params.toString();
       exportLinkEl.classList.remove('disabled');
       exportLinkEl.removeAttribute('aria-disabled');
     }
@@ -578,7 +696,14 @@
     searchBtn.addEventListener('click', async () => {
       const token = sessionStorage.getItem(TOKEN_KEY) || '';
       const extra = (extraParamsEl.value || '').trim();
-      if (!searchBounds && !extra) {
+      const hasExtraBeyondObscuration = !extra ? false : (() => {
+        try {
+          const p = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
+          p.delete('obscuration');
+          return p.toString().trim() !== '';
+        } catch (e) { return true; }
+      })();
+      if (!searchBounds && !hasExtraBeyondObscuration) {
         setStatus('Draw a search area and/or enter query parameters (e.g. place_id), then Search.', true);
         return;
       }
@@ -635,11 +760,14 @@
         params.set('nelng', String(b.nelng));
       }
       if (viewerPrefs.preferred_place_id) params.set('preferred_place_id', String(viewerPrefs.preferred_place_id));
-      if (obscuredOnlyEl && obscuredOnlyEl.checked) params.set('obscuration', 'obscured,private');
+      const obscurationVal = getObscurationValue();
+      if (obscurationVal) params.set('obscuration', obscurationVal);
       if (extra) {
         try {
           const parsed = new URLSearchParams(extra.startsWith('?') ? extra.slice(1) : extra);
-          parsed.forEach((value, key) => params.set(key, value));
+          parsed.forEach((value, key) => {
+            if (key !== 'obscuration') params.set(key, value);
+          });
         } catch (e) {
           setStatus('Invalid extra parameters: ' + e.message, true);
           return;
