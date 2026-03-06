@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FAQ — Authenticated iNaturalist observation viewer</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; padding: 20px; max-width: 640px; line-height: 1.5; color: #333; }
+    h1 { font-size: 1.25rem; margin-bottom: 1em; }
+    h2 { font-size: 1rem; margin-top: 1.5em; margin-bottom: 0.35em; color: #111; }
+    p { margin: 0 0 0.75em 0; }
+    .faq-block { margin-bottom: 1.5em; }
+    .faq-block img { max-width: 100%; height: auto; border: 1px solid #ccc; border-radius: 6px; margin-top: 0.5em; display: block; }
+    a { color: #74ac00; }
+    a:hover { text-decoration: underline; }
+    .back { display: inline-block; margin-bottom: 1em; font-size: 0.9rem; }
+    code { background: #eee; padding: 0.1em 0.35em; border-radius: 3px; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <a href="#" id="faq-back-link" class="back">← Back to viewer</a>
+  <h1>FAQ</h1>
+
+  <div class="faq-block">
+    <h2>Why are pins showing up outside my bounding box?</h2>
+    <p>Due to limitations of the iNaturalist API, bounding box searches return observations which have <em>public</em> coordinates inside the box. The pin is on the private coordinates, which may be inside the box, or may be outside the box.</p>
+    <p>In the example, the pin is on the private location of an observation and the faded circle is the public location of that same observation. A search around the faded circle will return the pin outside the box.</p>
+    <img src="example_public.png" alt="Pin at private location, faded circle at public location; search around circle returns pin outside box." width="400" height="240" />
+  </div>
+
+  <div class="faq-block">
+    <h2>I know the true location of my observation, but a bounding box search doesn't return it, why not?</h2>
+    <p>This is the converse of the previous question. Since bounding box searches can only return observations which have <em>public</em> coordinates inside the box, if your bounding box encloses the private coordinates, but not the public coordinates, the observation will not be returned. Expand your search area to include the public coordinates and the pin will appear at the private location.</p>
+    <p>In the example, the pin is on the private location of an observation and the faded circle is the public location of that same observation. A search around the pin (but not the circle) will not return this observation.</p>
+    <img src="example_private.png" alt="Pin at private location, faded circle at public location; search around pin only does not return observation." width="400" height="240" />
+  </div>
+
+  <div class="faq-block">
+    <h2>Why aren't my private observations showing up in a bounding box search?</h2>
+    <p>Due to limitations of the iNaturalist API, private observations can only be returned if there is no place restriction on the search (a global search), or if the place restriction is set by <code>place_id</code> rather than bounding box. Remove the bounding box or search by <code>place_id</code> to find your private observations.</p>
+  </div>
+
+  <div class="faq-block">
+    <h2>How do I know who trusts me with their private/obscured observations?</h2>
+    <p>iNaturalist does not currently provide a way to view this information.</p>
+  </div>
+
+  <div class="faq-block">
+    <h2>When I click through to iNaturalist's Explore/Identify/Export page, I get different results, why?</h2>
+    <p>Some iNaturalist pages don't support some search parameters (for example, the Export page doesn't support the obscuration parameter). Consider opening a discussion on the <a href="https://forum.inaturalist.org" target="_blank" rel="noopener noreferrer">iNaturalist Forum</a> for workarounds, or if there is no alternative, you can make a feature request to support the parameter.</p>
+  </div>
+
+  <div class="faq-block">
+    <h2>Why isn't viewing private/obscured observations available on iNaturalist?</h2>
+    <p>See <a href="https://forum.inaturalist.org/t/view-true-locations-on-maps-for-observations-with-trusted-hidden-coordinates/2568" target="_blank" rel="noopener noreferrer">this forum thread</a>.</p>
+  </div>
+  <script>
+    document.getElementById('faq-back-link').addEventListener('click', function(e) {
+      if (window !== window.parent) {
+        e.preventDefault();
+        window.parent.postMessage('closeFaqModal', '*');
+      } else {
+        this.href = 'iNat_obscured_observation_viewer_local.html';
+      }
+    });
+  </script>
+</body>
+</html>
