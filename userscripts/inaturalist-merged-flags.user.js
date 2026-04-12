@@ -1077,7 +1077,7 @@
         Using the normal iNaturalist flags page below. Switch to <strong>Merged taxa</strong> for the multi-taxon queue.
       </p>
       <div id="inat-merge-merged-ui">
-        <h3>Merged taxon flags (lazy merge)</h3>
+        <h3>Merged taxon flags</h3>
         <p class="text-muted" style="margin:0 0 0.5rem;font-size:13px;">
           <strong>Taxa:</strong> type to search and pick from the list, or paste comma-separated taxon IDs. Merge order is <strong>newest first</strong> by flag ID.
         </p>
