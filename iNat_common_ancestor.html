@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="Find the finest common ancestor of iNaturalist taxa and browse the tree" />
+<title>iNaturalist Common Ancestor</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #6b7280;
+  --line: #cbd5e1;
+  --accent: #4a7c2f;        /* iNat-ish green */
+  --accent-soft: #eaf3e2;
+  --target: #14532d;
+  --chip-bg: #eef2f7;
+  --chip-border: #d1d9e6;
+  --dd-bg: #ffffff;
+  --dd-hover: #eef5e8;
+  --err: #b91c1c;
+}
+/* dark palette, shared by auto-dark and forced-dark */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14171c;
+    --fg: #e6e8eb;
+    --muted: #9aa4b2;
+    --line: #384250;
+    --accent: #8bc34a;
+    --accent-soft: #22301a;
+    --target: #b6e58a;
+    --chip-bg: #222833;
+    --chip-border: #384250;
+    --dd-bg: #1b2028;
+    --dd-hover: #2a3342;
+    --err: #f87171;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14171c;
+  --fg: #e6e8eb;
+  --muted: #9aa4b2;
+  --line: #384250;
+  --accent: #8bc34a;
+  --accent-soft: #22301a;
+  --target: #b6e58a;
+  --chip-bg: #222833;
+  --chip-border: #384250;
+  --dd-bg: #1b2028;
+  --dd-hover: #2a3342;
+  --err: #f87171;
+}
+
+* { box-sizing: border-box; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  margin: 0;
+  line-height: 1.45;
+}
+.tw-wrap { max-width: 900px; margin: 0 auto; padding: 1.5rem 1.25rem 4rem; }
+
+.tw-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
+.tw-sub { color: var(--muted); margin: 0; font-size: .95rem; }
+.tw-sub a { color: var(--accent); }
+.tw-try { color: var(--muted); font-size: .95rem; margin: 1rem 0 .5rem; }
+.tw-try a { color: var(--accent); }
+
+/* "How it works" disclosure */
+.tw-help { margin: .9rem 0 0; font-size: .9rem; }
+.tw-help > summary { cursor: pointer; color: var(--accent); width: fit-content; }
+.tw-help > summary:hover { text-decoration: underline; }
+.tw-help-body { color: var(--muted); margin-top: .5rem; }
+.tw-help-body p { margin: 0 0 .5rem; }
+.tw-help-body ul { margin: 0; padding-left: 1.2rem; }
+.tw-help-body li { margin: .25rem 0; }
+.tw-help-body b { color: var(--fg); font-weight: 600; }
+
+/* theme toggle */
+.tw-theme-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px; flex: 0 0 auto;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--fg); cursor: pointer;
+}
+.tw-theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tw-theme-btn svg { display: block; }
+
+/* ---- search / input ---- */
+.tw-search { position: relative; }
+.tw-inputrow { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+#tw-input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: .55rem .7rem;
+  font-size: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+}
+#tw-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.tw-btn {
+  padding: .55rem .9rem;
+  font-size: .95rem;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.tw-btn:hover { filter: brightness(1.06); }
+.tw-btn.tw-ghost { background: transparent; color: var(--accent); }
+
+/* autocomplete dropdown */
+.tw-dd {
+  position: absolute;
+  z-index: 20;
+  left: 0; right: 0;
+  top: calc(100% + 4px);
+  background: var(--dd-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.15);
+  overflow: hidden;
+  display: none;
+}
+.tw-dd.tw-open { display: block; }
+.tw-dd-item {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .45rem .6rem;
+  cursor: pointer;
+}
+.tw-dd-item.tw-active, .tw-dd-item:hover { background: var(--dd-hover); }
+.tw-dd-thumb { width: 34px; height: 34px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; background: var(--chip-bg); }
+.tw-dd-txt { min-width: 0; }
+.tw-dd-name { font-weight: 600; }
+.tw-dd-meta { color: var(--muted); font-size: .82rem; }
+
+/* chips */
+.tw-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0 0; }
+.tw-chip {
+  display: inline-flex; align-items: baseline; gap: .4rem;
+  background: var(--chip-bg);
+  border: 1px solid var(--chip-border);
+  border-radius: 999px;
+  padding: .2rem .3rem .2rem .6rem;
+  font-size: .9rem;
+}
+.tw-chip .tw-chip-rank { color: var(--muted); font-size: .78rem; }
+.tw-chip-x {
+  cursor: pointer; border: none; background: transparent; color: var(--muted);
+  font-size: 1.05rem; line-height: 1; padding: 0 .25rem; border-radius: 999px;
+  align-self: center;
+}
+.tw-chip-x:hover { color: var(--err); }
+.tw-clear {
+  border: none; background: transparent; color: var(--muted); cursor: pointer;
+  font-size: .85rem; text-decoration: underline; padding: .2rem .35rem; align-self: center;
+}
+.tw-clear:hover { color: var(--err); }
+
+/* status + summary */
+.tw-status { margin: 1rem 0 0; color: var(--muted); font-size: .92rem; min-height: 1.45em; line-height: 1.45; }
+.tw-status.tw-err { color: var(--err); }
+.tw-summary {
+  margin: 1.1rem 0 .25rem;
+  padding: .6rem .8rem;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  font-size: .95rem;
+}
+.tw-summary b { color: var(--target); }
+
+/* controls bar */
+.tw-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin: 1rem 0 .25rem; font-size: .9rem; }
+.tw-controls:empty { display: none; margin: 0; }
+.tw-ctrl-check { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; user-select: none; }
+.tw-btn.tw-sm { padding: .3rem .7rem; font-size: .85rem; }
+
+/* ---- tree ---- */
+.tw-tree { list-style: none; margin: 0; padding: 0; }
+.tw-nested { padding-left: 1.15em; margin-left: .35em; border-left: 1px solid var(--line); display: none; }
+.tw-li.tw-open > .tw-nested { display: block; }
+.tw-li { position: relative; }
+.tw-row { display: flex; align-items: center; gap: .35em; padding: .13em 0; }
+
+.tw-toggle {
+  flex: 0 0 auto;
+  width: 1.2em; text-align: center;
+  cursor: pointer; user-select: none;
+  color: var(--muted); font-size: .85em;
+}
+.tw-toggle.tw-leaf { cursor: default; }
+
+.tw-label { display: inline-flex; align-items: center; gap: .35em; flex-wrap: wrap; }
+.tw-thumb { width: 40px; height: 40px; border-radius: 5px; object-fit: cover; background: var(--chip-bg); }
+.tw-rank { color: var(--muted); font-size: .82em; }
+.tw-name { color: var(--fg); text-decoration: none; }
+.tw-name:hover { text-decoration: underline; }
+.tw-name.tw-sci { font-style: italic; }
+.tw-infra { font-style: normal; }
+.tw-common { color: var(--muted); font-size: .88em; }
+.tw-count { color: var(--muted); font-size: .82em; }
+.tw-fill {
+  border: 1px solid var(--line); background: transparent; color: var(--muted);
+  font-size: .72em; line-height: 1; padding: .18em .55em; border-radius: 999px;
+  cursor: pointer; margin-left: .1em; white-space: nowrap;
+}
+.tw-fill:hover { border-color: var(--accent); color: var(--accent); }
+.tw-fill.tw-loading { opacity: .6; cursor: default; }
+.tw-target .tw-name { font-weight: 700; color: var(--target); }
+.tw-lca-badge {
+  font-size: .72em; font-weight: 600;
+  background: var(--accent); color: #fff;
+  padding: .05em .5em; border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* hover preview popover */
+#tw-pop {
+  position: fixed; z-index: 50; width: 400px; max-width: calc(100vw - 16px);
+  background: var(--dd-bg); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.22); overflow: hidden; display: none;
+}
+#tw-pop.tw-open { display: block; }
+.tw-pop-main { width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--chip-bg); display: block; }
+.tw-pop-attr { font-size: .66rem; color: var(--muted); padding: 3px 10px 0; line-height: 1.3; }
+.tw-pop-attr a { color: inherit; text-decoration: underline; }
+.tw-pop-attr a:hover { color: var(--accent); }
+.tw-pop-mainlink { display: block; }
+.tw-pop-thumbs { display: flex; gap: 4px; padding: 6px 10px 0; overflow-x: auto; }
+.tw-pop-thumb { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; cursor: pointer; flex: 0 0 auto; border: 2px solid transparent; }
+.tw-pop-thumb.tw-sel { border-color: var(--accent); }
+.tw-pop-body { padding: 8px 10px 10px; }
+.tw-pop-title { font-size: 1rem; }
+.tw-pop-title.tw-sci { font-style: italic; }
+.tw-pop-common { color: var(--muted); font-size: .85rem; }
+.tw-pop-desc {
+  margin: 6px 0 0; font-size: .82rem; line-height: 1.45;
+  display: -webkit-box; -webkit-line-clamp: 10; line-clamp: 10; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tw-pop-src { margin-top: 4px; font-size: .68rem; color: var(--muted); }
+.tw-pop-src a { color: inherit; text-decoration: underline; }
+.tw-pop-src a:hover { color: var(--accent); }
+.tw-pop-link { display: inline-block; margin-top: 6px; color: var(--accent); font-size: .82rem; text-decoration: none; }
+.tw-pop-link:hover { text-decoration: underline; }
+
+footer { margin-top: 2.5rem; color: var(--muted); font-size: .82rem; }
+footer a { color: var(--accent); }
+</style>
+<script>
+  // Apply a saved theme before first paint to avoid a flash.
+  try { var _t = localStorage.getItem("tw-theme"); if (_t && _t !== "auto") document.documentElement.setAttribute("data-theme", _t); } catch (e) {}
+</script>
+</head>
+
+<body>
+<div class="tw-wrap">
+  <div class="tw-header">
+    <h1>iNaturalist Common Ancestor</h1>
+    <button type="button" class="tw-theme-btn" id="tw-theme-btn" aria-label="Toggle light/dark theme"></button>
+  </div>
+  <p class="tw-sub">
+    Find the finest common ancestor of iNaturalist taxa — the node you'd use as a coarse ID when an
+    observation has multiple possibilities. Or enter a single taxon to use as a plain tree browser.
+  </p>
+  <p class="tw-try">Try: <a href="#" id="tw-example">Cooper's Hawk + Sharp-shinned Hawk</a>.</p>
+
+  <div class="tw-search">
+    <div class="tw-inputrow">
+      <input type="text" id="tw-input" placeholder="Enter a taxon name or number, e.g. eastern gray squirrel, Danaus plexippus, 54779"
+             autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="tw-dd" id="tw-dd"></div>
+    <div class="tw-chips" id="tw-chips"></div>
+  </div>
+
+  <details class="tw-help">
+    <summary>How to use</summary>
+    <div class="tw-help-body">
+      <p>Add taxa by name or ID number — the tree rebuilds as you go. Add two or more and the node
+        that contains all of them is badged as the <b>finest common ancestor</b>. Each taxon links to
+        its iNaturalist page, and hovering a taxon shows photos and the Wikipedia description (click a photo to open
+        it on iNaturalist).</p>
+      <ul>
+        <li><b>▸ arrow</b> — expand or collapse a node. <b>Ctrl-click</b> (<b>⌘-click</b> on Mac) to expand
+          or collapse all sibling nodes too (expanding skips siblings whose children haven't been loaded yet).</li>
+        <li><b>show all children</b> — on a node along the path, pull in its other children so you can
+          browse past the target lineage; <b>hide extra children</b> removes them again.</li>
+        <li><b>Hide minor ranks</b> — collapse the path down to the seven major ranks (kingdom →
+          species), hiding subgenus, tribe, etc. Choosing <b>show all children</b> turns
+          this off, since that's a request for the full structure.</li>
+        <li><b>Collapse all</b> closes every node but keeps what's loaded; <b>Reset tree</b> returns to
+          the plain common-ancestor view.</li>
+      </ul>
+    </div>
+  </details>
+
+  <div class="tw-status" id="tw-status"></div>
+  <div id="tw-summary"></div>
+  <div class="tw-controls" id="tw-controls"></div>
+  <div id="tw-tree"></div>
+  <div id="tw-pop" role="tooltip"></div>
+
+  <footer>
+    Unofficial tool built with data from the <a href="https://api.inaturalist.org/v2/docs/" target="_blank" rel="noopener">iNaturalist API</a>.
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+const API = "https://api.inaturalist.org/v2";
+
+const TAXA_FIELDS =
+  "(name:!t,rank:!t,rank_level:!t,preferred_common_name:!t,ancestor_ids:!t," +
+  "default_photo:(id:!t,square_url:!t,medium_url:!t,attribution:!t,attribution_name:!t,license_code:!t)," +
+  "taxon_photos:(photo:(id:!t,square_url:!t,medium_url:!t,url:!t,attribution:!t,attribution_name:!t,license_code:!t))," +
+  "wikipedia_summary:!t,wikipedia_url:!t)";
+const CHILD_FIELDS = "(name:!t,rank:!t,rank_level:!t)";
+const AC_FIELDS = "(name:!t,rank:!t,preferred_common_name:!t,default_photo:(square_url:!t))";
+
+// ---- state ----
+let selected = [];               // [{id, name, rank, preferred_common_name, default_photo}]
+let nodeMap = {};                // id -> taxon object
+let skelChildren = new Map();    // id -> Set(childId)  (the common-ancestor lineage edges)
+let loadedChildren = new Map();  // id -> [childId]     (children fetched from the API)
+let loadedIds = new Set();       // ids whose children have been fetched (even if none)
+let expandedIds = new Set();     // ids whose children are currently shown
+let targetIds = new Set();       // the user's input taxa (highlighted)
+let theLcaId = null;
+let hideMinor = false;           // "hide minor ranks" toggle
+let skeletonNodes = new Set();   // ids on the lineage (LCA -> targets); only these get hidden
+
+const $ = (id) => document.getElementById(id);
+const inputEl = $("tw-input");
+const ddEl = $("tw-dd");
+const chipsEl = $("tw-chips");
+const statusEl = $("tw-status");
+const summaryEl = $("tw-summary");
+const ctrlEl = $("tw-controls");
+const treeEl = $("tw-tree");
+const popEl = $("tw-pop");
+
+const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : "";
+
+// ---- generic API helpers ----
+async function apiJson(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    const e = new Error("HTTP " + r.status);
+    e.status = r.status;
+    throw e;
+  }
+  return r.json();
+}
+
+function handleErr(e) {
+  if (e && e.name === "AbortError") return;
+  if (e && e.status === 429) {
+    setStatus("iNaturalist is rate-limiting requests (60/min). Wait about a minute, then try again.", true);
+  } else {
+    setStatus("There was a problem retrieving data from iNaturalist" + (e && e.message ? " (" + e.message + ")" : "") + ".", true);
+  }
+}
+
+function setStatus(msg, isErr) {
+  statusEl.textContent = msg || "";
+  statusEl.classList.toggle("tw-err", !!isErr);
+}
+
+// Batched taxa detail fetch, <=30 ids per call. /taxa?id=1,2,3, won't work (it's missing fields)
+async function fetchTaxa(ids, fields = TAXA_FIELDS) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 30) {
+    const chunk = ids.slice(i, i + 30);
+    const data = await apiJson(
+      API + "/taxa/" + chunk.join(",") + "?per_page=30&fields=" + encodeURIComponent(fields));
+    out.push(...(data.results || []));
+  }
+  const byId = {};
+  for (const r of out) byId[r.id] = r;
+  return ids.map((id) => byId[id]).filter(Boolean);
+}
+
+// Children of a node (the "expand" call), paginated at 500.
+async function fetchChildren(parentId) {
+  const per = 500;
+  const base = API + "/taxa?is_active=true&per_page=" + per + "&parent_id=" + parentId +
+    "&fields=" + encodeURIComponent(CHILD_FIELDS);
+  const first = await apiJson(base + "&page=1");
+  let results = first.results || [];
+  const total = first.total_results || results.length;
+  if (total > per) {
+    const pages = Math.ceil(total / per);
+    const rest = [];
+    for (let p = 2; p <= pages; p++) {
+      rest.push(apiJson(base + "&page=" + p).then((d) => d.results || []));
+    }
+    for (const m of await Promise.all(rest)) results = results.concat(m);
+  }
+  return results;
+}
+
+// Same ordering iNat uses: rank_level desc, then name.
+function compTaxa(a, b) {
+  const r = (b.rank_level || 0) - (a.rank_level || 0);
+  if (r !== 0) return r;
+  return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0);
+}
+
+// ---- autocomplete ----
+let acTimer = null, acAbort = null, acItems = [], acActive = -1;
+
+inputEl.addEventListener("input", () => {
+  clearTimeout(acTimer);
+  const q = inputEl.value.trim();
+  if (!q) { closeDropdown(); return; }
+  acTimer = setTimeout(() => runAutocomplete(q), 300);   // debounce
+});
+
+inputEl.addEventListener("keydown", (e) => {
+  if (!ddEl.classList.contains("tw-open")) {
+    if (e.key === "Enter") { e.preventDefault(); buildTree(); }
+    return;
+  }
+  if (e.key === "ArrowDown") { e.preventDefault(); moveActive(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); moveActive(-1); }
+  else if (e.key === "Enter") {
+    e.preventDefault();
+    const pick = acActive >= 0 ? acItems[acActive] : acItems[0];
+    if (pick) chooseTaxon(pick);
+  } else if (e.key === "Escape") { closeDropdown(); }
+});
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".tw-search")) closeDropdown();
+});
+
+// We use /taxa/autocomplete (a typeahead endpoint: prefix name-matching ranked by
+// observation count) rather than /search?sources=taxa (the unified site search, Elasticsearch
+// relevance) because autocomplete gave better results in testing.
+async function runAutocomplete(q) {
+  if (acAbort) acAbort.abort();          // cancel any in-flight request
+  acAbort = new AbortController();
+  try {
+    const data = await apiJson(
+      API + "/taxa/autocomplete?q=" + encodeURIComponent(q) + "&per_page=8&fields=" + encodeURIComponent(AC_FIELDS),
+      { signal: acAbort.signal }
+    );
+    renderDropdown(data.results || []);
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    handleErr(e);
+  }
+}
+
+function renderDropdown(results) {
+  acItems = results;
+  acActive = -1;
+  ddEl.innerHTML = "";
+  if (!results.length) { closeDropdown(); return; }
+  results.forEach((t) => {
+    const item = document.createElement("div");
+    item.className = "tw-dd-item";
+    const photo = t.default_photo && t.default_photo.square_url;
+    const common = t.preferred_common_name ? " · " + t.preferred_common_name : "";
+    item.innerHTML =
+      (photo ? '<img class="tw-dd-thumb" src="' + photo + '" alt="">' : '<span class="tw-dd-thumb"></span>') +
+      '<span class="tw-dd-txt"><span class="tw-dd-name"></span>' +
+      '<div class="tw-dd-meta">' + cap(t.rank) + common + '</div></span>';
+    item.querySelector(".tw-dd-name").textContent = t.name;
+    // mousedown (not click) so it fires before the input blur
+    item.addEventListener("mousedown", (e) => { e.preventDefault(); chooseTaxon(t); });
+    ddEl.appendChild(item);
+  });
+  ddEl.classList.add("tw-open");
+}
+
+function moveActive(dir) {
+  const items = [...ddEl.children];
+  if (!items.length) return;
+  acActive = (acActive + dir + items.length) % items.length;
+  items.forEach((el, i) => el.classList.toggle("tw-active", i === acActive));
+}
+
+function closeDropdown() {
+  ddEl.classList.remove("tw-open");
+  ddEl.innerHTML = "";
+  acItems = []; acActive = -1;
+}
+
+function chooseTaxon(t) {
+  const added = addSelected(t);
+  inputEl.value = "";
+  closeDropdown();
+  inputEl.focus();
+  if (added) buildTree();          // live update — no "Show tree" click needed
+}
+
+// ---- selected chips ----
+function addSelected(t) {
+  if (selected.some((s) => s.id === t.id)) return false;
+  selected.push({
+    id: t.id, name: t.name, rank: t.rank,
+    preferred_common_name: t.preferred_common_name,
+    default_photo: t.default_photo
+  });
+  renderChips();
+  return true;
+}
+
+function removeSelected(id) {
+  selected = selected.filter((s) => s.id !== id);
+  renderChips();
+  if (selected.length) buildTree();   // rebuild for the smaller set
+  else clearTree();                   // last chip gone — clear the view
+}
+
+function renderChips() {
+  chipsEl.innerHTML = "";
+  for (const s of selected) {
+    const chip = document.createElement("span");
+    chip.className = "tw-chip";
+    chip.innerHTML =
+      '<span class="tw-chip-rank">' + cap(s.rank) + '</span><span class="tw-chip-name"></span>' +
+      '<button class="tw-chip-x" title="Remove" aria-label="Remove">×</button>';
+    chip.querySelector(".tw-chip-name").textContent = s.name;
+    chip.querySelector(".tw-chip-x").addEventListener("click", () => removeSelected(s.id));
+    chipsEl.appendChild(chip);
+  }
+  if (selected.length > 1) {
+    const clr = document.createElement("button");
+    clr.type = "button";
+    clr.className = "tw-clear";
+    clr.textContent = "Clear all";
+    clr.addEventListener("click", clearAll);
+    chipsEl.appendChild(clr);
+  }
+}
+
+// Clear the rendered tree + summary + controls (leaves chips alone).
+function clearTree() {
+  treeEl.innerHTML = "";
+  summaryEl.innerHTML = "";
+  ctrlEl.innerHTML = "";
+  theLcaId = null;
+  setStatus("");
+  history.replaceState(null, "", location.pathname);
+}
+
+// Remove every selected taxon and clear the tree.
+function clearAll() {
+  selected = [];
+  renderChips();
+  clearTree();
+  inputEl.focus();
+}
+
+// ---- LCA ----
+// ancestor_ids are ordered root -> self, so the finest common ancestor of a set
+// is the last element of the longest shared prefix.
+function commonAncestorId(lists) {
+  let prefix = lists[0].slice();
+  for (let k = 1; k < lists.length; k++) {
+    const l = lists[k];
+    let i = 0;
+    while (i < prefix.length && i < l.length && prefix[i] === l[i]) i++;
+    prefix = prefix.slice(0, i);
+  }
+  return prefix.length ? prefix[prefix.length - 1] : 48460; // fall back to Life
+}
+
+// ---- build ----
+let buildSeq = 0;
+
+async function buildTree() {
+  closeDropdown();
+  if (selected.length === 0) { clearTree(); return; }
+
+  const seq = ++buildSeq;            // only the latest build is allowed to render
+  setStatus("Loading…");
+  summaryEl.innerHTML = "";
+  const ids = selected.map((s) => s.id);
+  setUrl(ids);
+
+  let targets;
+  try {
+    targets = await fetchTaxa(ids);
+  } catch (e) { if (seq === buildSeq) handleErr(e); return; }
+  if (seq !== buildSeq) return;
+  if (!targets.length) { setStatus("Could not load those taxa.", true); return; }
+
+  // ancestor_ids from the API is root -> parent and EXCLUDES the taxon itself,
+  // so append self to get a full root -> self chain for every target.
+  const chains = targets.map((t) => {
+    const anc = t.ancestor_ids || [];
+    return anc[anc.length - 1] === t.id ? anc.slice() : anc.concat([t.id]);
+  });
+  const lcaId = targets.length === 1 ? targets[0].id : commonAncestorId(chains);
+
+  // Each lineage from the LCA down to (and including) each target.
+  const paths = chains.map((chain) => {
+    const start = chain.indexOf(lcaId);
+    return start < 0 ? [chain[chain.length - 1]] : chain.slice(start);
+  });
+
+  const needed = new Set();
+  for (const path of paths) for (const id of path) needed.add(id);
+  skeletonNodes = needed;   // exactly the lineage nodes — the only ones hide-minor may elide
+
+  nodeMap = {};
+  for (const t of targets) nodeMap[t.id] = t;
+  const toFetch = [...needed].filter((id) => !nodeMap[id]);
+  if (toFetch.length) {
+    try {
+      const fetched = await fetchTaxa(toFetch);
+      if (seq !== buildSeq) return;
+      for (const n of fetched) nodeMap[n.id] = n;
+    } catch (e) { if (seq === buildSeq) handleErr(e); return; }
+  }
+
+  // Skeleton edges: parent -> child along each lineage below the LCA.
+  skelChildren = new Map();
+  for (const path of paths) {
+    for (let i = 0; i < path.length - 1; i++) {
+      if (!skelChildren.has(path[i])) skelChildren.set(path[i], new Set());
+      skelChildren.get(path[i]).add(path[i + 1]);
+    }
+  }
+
+  targetIds = new Set(ids);
+  theLcaId = lcaId;
+  loadedChildren = new Map();
+  loadedIds = new Set();
+  expandedIds = new Set(skelChildren.keys());   // lineage nodes start expanded
+
+  setStatus("");
+  renderSummary();
+  renderControls();
+  renderTree();
+}
+
+function renderSummary() {
+  summaryEl.innerHTML = "";
+  if (targetIds.size < 2) return;
+  const lca = nodeMap[theLcaId];
+  if (!lca) return;
+  const names = selected.map((s) => s.name).join(", ");
+  const div = document.createElement("div");
+  div.className = "tw-summary";
+  div.innerHTML = "Finest common ancestor of " + escapeHtml(names) + ": ";
+  const b = document.createElement("b");
+  b.textContent = cap(lca.rank) + " " + lca.name +
+    (lca.preferred_common_name ? " (" + lca.preferred_common_name + ")" : "");
+  div.appendChild(b);
+  summaryEl.appendChild(div);
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ---- tree rendering (state-driven) ----
+const MAJOR_LEVELS = new Set([70, 60, 50, 40, 30, 20, 10]); // kingdom, phylum, class, order, family, genus, species
+
+// A node is hidden only when "hide minor ranks" is on, it's a minor rank, and it's a
+// lineage node (on the LCA->targets path) that isn't itself a target or the LCA. We limit
+// it to lineage nodes because they always have loaded descendants to promote in their
+// place; browse-expanded minor nodes have nothing loaded yet, so hiding them would just
+// make expanding show nothing.
+function isHidden(id) {
+  if (!hideMinor) return false;
+  if (!skeletonNodes.has(id)) return false;
+  if (targetIds.has(id) || id === theLcaId) return false;
+  const n = nodeMap[id];
+  return !!n && !MAJOR_LEVELS.has(n.rank_level);
+}
+
+// Raw children of a node: its lineage (skeleton) children plus any fetched from the API.
+function rawChildren(id) {
+  const out = [], seen = new Set();
+  const push = (c) => { if (!seen.has(c)) { seen.add(c); out.push(c); } };
+  const sk = skelChildren.get(id);
+  if (sk) for (const c of sk) push(c);
+  const ld = loadedChildren.get(id);
+  if (ld) for (const c of ld) push(c);
+  return out;
+}
+
+// Children to display: hidden (minor-rank) nodes are skipped and their own children
+// promoted up in their place. Siblings are sorted at each RAW level *before* promotion
+// (never after), so hiding a node keeps the branches in their full-tree order instead of
+// re-sorting the promoted descendants by name.
+function displayChildren(id) {
+  const kids = rawChildren(id).slice().sort((a, b) => compTaxa(nodeMap[a] || {}, nodeMap[b] || {}));
+  const out = [];
+  for (const c of kids) {
+    if (isHidden(c)) out.push(...displayChildren(c));
+    else out.push(c);
+  }
+  const seen = new Set();
+  return out.filter((x) => { if (seen.has(x)) return false; seen.add(x); return true; });
+}
+
+function renderTree() {
+  treeEl.innerHTML = "";
+  const ul = document.createElement("ul");
+  ul.className = "tw-tree";
+  treeEl.appendChild(ul);
+  renderNode(theLcaId, ul);
+}
+
+// Re-render without moving the clicked row on screen: sibling toggles above it would shift it.
+function renderKeepingRow(id, li) {
+  const before = li.getBoundingClientRect().top;
+  renderTree();
+  const now = treeEl.querySelector('.tw-li[data-taxon-id="' + id + '"]');
+  if (now) window.scrollBy(0, now.getBoundingClientRect().top - before);
+}
+
+// Controls bar (rank toggle + reset), shown once a tree exists.
+function renderControls() {
+  ctrlEl.innerHTML = "";
+  if (!theLcaId) return;
+
+  const label = document.createElement("label");
+  label.className = "tw-ctrl-check";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.id = "tw-hide-minor";
+  cb.checked = hideMinor;
+  cb.addEventListener("change", () => { hideMinor = cb.checked; renderTree(); });
+  label.appendChild(cb);
+  label.appendChild(document.createTextNode(" Hide minor ranks"));
+  ctrlEl.appendChild(label);
+
+  const collapse = document.createElement("button");
+  collapse.type = "button";
+  collapse.className = "tw-btn tw-ghost tw-sm";
+  collapse.textContent = "Collapse all";
+  collapse.title = "Close all nodes";
+  collapse.addEventListener("click", collapseAll);
+  ctrlEl.appendChild(collapse);
+
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "tw-btn tw-ghost tw-sm";
+  reset.textContent = "Reset tree";
+  reset.title = "Restore tree to initial state";
+  reset.addEventListener("click", resetTree);
+  ctrlEl.appendChild(reset);
+}
+
+function renderNode(id, parentUl) {
+  let node = nodeMap[id];
+  if (!node) node = nodeMap[id] = { id: id, name: "(taxon " + id + ")", rank: "", rank_level: null };
+
+  const li = document.createElement("li");
+  li.className = "tw-li";
+  li.dataset.taxonId = id;
+
+  const row = document.createElement("div");
+  row.className = "tw-row";
+  const tog = document.createElement("span");
+  tog.className = "tw-toggle";
+  row.appendChild(tog);
+  row.appendChild(buildLabel(node, id));
+  li.appendChild(row);
+
+  const kids = displayChildren(id);
+  const loaded = loadedIds.has(id);
+  const expanded = expandedIds.has(id);
+  const terminal = node.rank_level != null && node.rank_level < 10; // below species: iNat has no children
+  const isLeaf = terminal || (loaded && kids.length === 0);
+
+  if (kids.length) {
+    if (loaded) setCount(li, kids.length);
+    if (expanded) {
+      const nested = document.createElement("ul");
+      nested.className = "tw-tree tw-nested";
+      li.appendChild(nested);
+      for (const k of kids) renderNode(k, nested);
+      setState(li, tog, true, false);
+    } else {
+      setState(li, tog, false, false);
+    }
+  } else if (isLeaf) {
+    setState(li, tog, false, true);       // confirmed leaf: no arrow
+  } else {
+    setState(li, tog, false, false);      // not loaded yet: arrow lazy-loads on expand
+  }
+
+  // Row control only on lineage nodes (those with a chipped taxon below them): fill the
+  // off-lineage children, or drop them. Off-lineage nodes just use the arrow to collapse.
+  if (!isLeaf && (skelChildren.get(id) || new Set()).size) {
+    if (loaded) addCollapseControl(id, row);
+    else addFillControl(id, row);
+  }
+
+  tog.addEventListener("click", (e) => onArrow(id, li, e.ctrlKey || e.metaKey));
+  parentUl.appendChild(li);
+  return li;
+}
+
+// "show all children": load every child of a lineage node (fills in the off-lineage siblings).
+function addFillControl(id, row) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tw-fill";
+  btn.textContent = "show all children";
+  btn.title = "Load this node's other children (the ones not on the lineage)";
+  btn.addEventListener("click", () => doFill(id, btn));
+  row.appendChild(btn);
+}
+
+// "hide extra children": the inverse — drop the loaded children, back to just the lineage.
+function addCollapseControl(id, row) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tw-fill";
+  btn.textContent = "hide extra children";
+  btn.title = "Remove the children that aren't on the path to your taxa";
+  btn.addEventListener("click", () => doCollapse(id));
+  row.appendChild(btn);
+}
+
+function setCount(li, n) {
+  const label = li.querySelector(":scope > .tw-row .tw-label");
+  if (!label) return;
+  let cnt = label.querySelector(".tw-count");
+  if (!cnt) { cnt = document.createElement("span"); cnt.className = "tw-count"; label.appendChild(cnt); }
+  cnt.textContent = "(" + n + ")";
+  cnt.title = n === 1 ? "1 child" : n + " children";
+}
+
+function buildLabel(node, id) {
+  const wrap = document.createElement("span");
+  wrap.className = "tw-label";
+
+  const isTarget = targetIds.has(id);
+  const isLca = id === theLcaId && targetIds.size > 1;
+  if (isTarget) wrap.classList.add("tw-target");
+  if (isTarget || isLca) {   // thumbnail on the targets and on the finest common ancestor
+    const photo = node.default_photo && node.default_photo.square_url;
+    if (photo) {
+      const img = document.createElement("img");
+      img.className = "tw-thumb"; img.src = photo; img.alt = ""; img.loading = "lazy";
+      wrap.appendChild(img);
+    }
+  }
+
+
+  const rl = node.rank_level;
+  const mark = { subspecies: "ssp.", variety: "var.", form: "f." }[node.rank];
+
+  // Rank label only for genus and above; species and infraspecifics get none.
+  const showRank = node.rank && (rl == null ? !mark && node.rank !== "species" : rl > 10);
+  if (showRank) {
+    const rank = document.createElement("span");
+    rank.className = "tw-rank";
+    rank.textContent = cap(node.rank);
+    wrap.appendChild(rank);
+  }
+
+  const a = document.createElement("a");
+  a.className = "tw-name";
+  if (rl != null && rl <= 20) a.classList.add("tw-sci");   // italicize genus and below
+  a.href = "https://www.inaturalist.org/taxa/" + id;
+  a.target = "_blank"; a.rel = "noopener";
+  if (mark && node.name.indexOf(" ") !== -1) {
+    // "Sciurus carolinensis carolinensis" -> italic epithets with a roman "ssp."/"var."/"f."
+    const parts = node.name.split(" ");
+    const last = parts.pop();
+    a.appendChild(document.createTextNode(parts.join(" ") + " "));
+    const m = document.createElement("span");
+    m.className = "tw-infra";
+    m.textContent = mark + " ";
+    a.appendChild(m);
+    a.appendChild(document.createTextNode(last));
+  } else {
+    a.textContent = node.name;
+  }
+  wrap.appendChild(a);
+
+  if (node.preferred_common_name) {
+    const c = document.createElement("span");
+    c.className = "tw-common";
+    c.textContent = node.preferred_common_name;
+    wrap.appendChild(c);
+  }
+
+  if (isLca) {
+    const badge = document.createElement("span");
+    badge.className = "tw-lca-badge";
+    badge.textContent = "finest common ancestor";
+    wrap.appendChild(badge);
+  }
+  return wrap;
+}
+
+function setState(li, tog, open, isLeaf) {
+  if (isLeaf) {
+    tog.textContent = "";
+    tog.classList.add("tw-leaf");
+    li.classList.remove("tw-open");
+    return;
+  }
+  tog.classList.remove("tw-leaf");
+  tog.textContent = open ? "▾" : "▸";
+  li.classList.toggle("tw-open", open);
+}
+
+function setLoaded(id, kids) {
+  loadedIds.add(id);
+  const arr = [];
+  for (const k of kids) {
+    // Merge without downgrading: a child fetch is lean (no photos), so don't clobber a
+    // richer object already in nodeMap (e.g. a target with default_photo / taxon_photos).
+    nodeMap[k.id] = Object.assign({}, k, nodeMap[k.id]);
+    arr.push(k.id);
+  }
+  loadedChildren.set(id, arr);
+}
+
+// The arrow does ONE thing: expand/collapse. If a node has never been loaded and has
+// nothing to show yet, "expand" means fetch its children once (normal lazy load).
+// Ctrl/Cmd-click gives every visible sibling the same new state; expanding skips siblings
+// with nothing loaded, so one click can't fire a request per sibling.
+async function onArrow(id, li, withSiblings) {
+  const opening = !expandedIds.has(id);
+  const parentLi = withSiblings ? li.parentElement.closest(".tw-li") : null;
+  if (parentLi) {
+    for (const s of displayChildren(+parentLi.dataset.taxonId)) {
+      if (s === id) continue;
+      if (!opening) expandedIds.delete(s);
+      else if (displayChildren(s).length) expandedIds.add(s);
+    }
+  }
+  if (displayChildren(id).length > 0 || loadedIds.has(id)) {
+    if (opening) expandedIds.add(id); else expandedIds.delete(id);
+    renderKeepingRow(id, li);
+    return;
+  }
+  if (parentLi) renderKeepingRow(id, li);   // show the sibling changes while this node loads
+  setStatus("Loading…");
+  let kids;
+  try { kids = await fetchChildren(id); }
+  catch (e) { handleErr(e); return; }
+  setStatus("");
+  setLoaded(id, kids);
+  expandedIds.add(id);
+  renderTree();
+}
+
+// "show all children": load every child of this node.
+async function doFill(id, btn) {
+  if (btn.classList.contains("tw-loading")) return;
+  btn.classList.add("tw-loading");
+  btn.textContent = "loading…";
+  let kids;
+  try { kids = await fetchChildren(id); }
+  catch (e) { btn.classList.remove("tw-loading"); btn.textContent = "show all children"; handleErr(e); return; }
+  setLoaded(id, kids);
+  if (hideMinor) {                       // showing full children contradicts decluttering — exit hide mode
+    hideMinor = false;
+    const cb = $("tw-hide-minor");
+    if (cb) cb.checked = false;
+  }
+  expandedIds.add(id);
+  renderTree();
+}
+
+// "hide extra children": drop this node's loaded children, back to the lineage (or, for a
+// node with no lineage children, collapse it entirely).
+function doCollapse(id) {
+  loadedChildren.delete(id);
+  loadedIds.delete(id);
+  if (!((skelChildren.get(id) || new Set()).size)) expandedIds.delete(id);
+  renderTree();
+}
+
+// Collapse all: close every node but keep the cache, so reopening is instant.
+function collapseAll() {
+  expandedIds = new Set();
+  renderTree();
+}
+
+// Reset: forget every expansion/fill, back to the pure common-ancestor tree.
+function resetTree() {
+  loadedChildren = new Map();
+  loadedIds = new Set();
+  expandedIds = new Set(skelChildren.keys());
+  renderTree();
+}
+
+// ---- shareable URL ----
+function setUrl(ids) {
+  const qs = "?taxa=" + ids.join(",");
+  if (location.search !== qs) history.replaceState(null, "", location.pathname + qs);
+}
+
+async function initFromUrl() {
+  const m = new URLSearchParams(location.search).get("taxa");
+  if (!m) return;
+  const ids = m.split(",").map((x) => parseInt(x, 10)).filter((n) => !isNaN(n));
+  if (!ids.length) return;
+  setStatus("Loading…");
+  try {
+    const taxa = await fetchTaxa(ids);
+    for (const t of taxa) addSelected(t);
+    if (selected.length) buildTree();
+  } catch (e) { handleErr(e); }
+}
+
+// example link
+$("tw-example").addEventListener("click", (e) => {
+  e.preventDefault();
+  selected = [];
+  chipsEl.innerHTML = "";
+  fetchTaxa([1579017, 5097]).then((taxa) => {
+    for (const t of taxa) addSelected(t);
+    buildTree();
+  }).catch(handleErr);
+});
+
+// ---- hover preview ----
+// Targets and lineage nodes already carry taxon_photos + wikipedia_summary from the
+// batched fetch (free). Nodes loaded via expansion don't, so we fetch their detail once
+// on a hover delay and cache it.
+let previewId = null, showTimer = null, hideTimer = null;
+const detailFetched = new Set(), detailPending = new Set();
+
+function nodeHasDetail(node) { return node && node.taxon_photos !== undefined; }
+
+treeEl.addEventListener("mouseover", (e) => {
+  const label = e.target.closest(".tw-label");
+  if (!label || !treeEl.contains(label)) return;
+  const li = label.closest(".tw-li");
+  if (!li) return;
+  const id = +li.dataset.taxonId;
+  clearTimeout(hideTimer);
+  if (previewId === id && popEl.classList.contains("tw-open")) return;
+  clearTimeout(showTimer);
+  showTimer = setTimeout(() => showPreview(id, label), 350);
+});
+treeEl.addEventListener("mouseout", (e) => {
+  if (e.target.closest(".tw-label")) scheduleHide();
+});
+treeEl.addEventListener("focusin", (e) => {
+  const label = e.target.closest(".tw-label");
+  if (label) { clearTimeout(hideTimer); showPreview(+label.closest(".tw-li").dataset.taxonId, label); }
+});
+treeEl.addEventListener("focusout", (e) => { if (e.target.closest(".tw-label")) scheduleHide(); });
+popEl.addEventListener("mouseenter", () => clearTimeout(hideTimer));
+popEl.addEventListener("mouseleave", scheduleHide);
+window.addEventListener("scroll", hidePreview, true);
+
+function scheduleHide() { clearTimeout(showTimer); clearTimeout(hideTimer); hideTimer = setTimeout(hidePreview, 200); }
+function hidePreview() { popEl.classList.remove("tw-open"); previewId = null; }
+
+function showPreview(id, anchor) {
+  previewId = id;
+  renderPopover(nodeMap[id] || {}, id);
+  popEl.classList.add("tw-open");
+  positionPopover(anchor);
+  if (!nodeHasDetail(nodeMap[id]) && !detailFetched.has(id)) fetchDetail(id, anchor);
+}
+
+async function fetchDetail(id, anchor) {
+  if (detailPending.has(id)) return;
+  detailPending.add(id);
+  try {
+    const arr = await fetchTaxa([id]);
+    if (arr[0]) nodeMap[id] = Object.assign(nodeMap[id] || {}, arr[0]);
+    detailFetched.add(id);
+  } catch (e) { /* keep the partial card */ }
+  finally { detailPending.delete(id); }
+  if (previewId === id && popEl.classList.contains("tw-open")) {
+    renderPopover(nodeMap[id], id);
+    positionPopover(anchor);
+  }
+}
+
+const LICENSE = {
+  "cc-by": ["CC BY", "https://creativecommons.org/licenses/by/4.0/"],
+  "cc-by-nc": ["CC BY-NC", "https://creativecommons.org/licenses/by-nc/4.0/"],
+  "cc-by-sa": ["CC BY-SA", "https://creativecommons.org/licenses/by-sa/4.0/"],
+  "cc-by-nd": ["CC BY-ND", "https://creativecommons.org/licenses/by-nd/4.0/"],
+  "cc-by-nc-sa": ["CC BY-NC-SA", "https://creativecommons.org/licenses/by-nc-sa/4.0/"],
+  "cc-by-nc-nd": ["CC BY-NC-ND", "https://creativecommons.org/licenses/by-nc-nd/4.0/"],
+  "cc0": ["CC0", "https://creativecommons.org/publicdomain/zero/1.0/"]
+};
+
+function photoPage(p) {
+  return p && p.id ? "https://www.inaturalist.org/photos/" + p.id : "#";
+}
+
+// Short credit: "(c) Name – (CC BY-NC)" with the code linked to its CC deed.
+function creditEl(photo) {
+  const el = document.createElement("div");
+  el.className = "tw-pop-attr";
+  if (!photo) return el;
+  const name = photo.attribution_name;
+  const lic = LICENSE[photo.license_code];
+  if (!name) { el.textContent = photo.attribution || ""; return el; }   // fallback to iNat's string
+  el.appendChild(document.createTextNode((photo.license_code === "cc0" ? "" : "(c) ") + name));
+  if (lic) {
+    el.appendChild(document.createTextNode(" – ("));
+    const a = document.createElement("a");
+    a.href = lic[1]; a.target = "_blank"; a.rel = "noopener license";
+    a.textContent = lic[0];
+    el.appendChild(a);
+    el.appendChild(document.createTextNode(")"));
+  } else {
+    el.appendChild(document.createTextNode(" – all rights reserved"));
+  }
+  return el;
+}
+
+function renderPopover(node, id) {
+  popEl.innerHTML = "";
+  const photos = (node.taxon_photos || []).map((tp) => tp.photo).filter(Boolean);
+  const first = photos[0] || node.default_photo;
+  const mainSrc = first && (first.medium_url || first.square_url || first.url);
+
+  if (mainSrc) {
+    const mainLink = document.createElement("a");
+    mainLink.className = "tw-pop-mainlink";
+    mainLink.target = "_blank"; mainLink.rel = "noopener";
+    mainLink.href = photoPage(first);
+    mainLink.title = "Open this photo on iNaturalist";
+    const main = document.createElement("img");
+    main.className = "tw-pop-main"; main.alt = ""; main.loading = "lazy"; main.src = mainSrc;
+    mainLink.appendChild(main);
+    popEl.appendChild(mainLink);
+
+    let creditNode = creditEl(first);
+    popEl.appendChild(creditNode);
+
+    const applyPhoto = (p) => {
+      main.src = p.medium_url || p.url;
+      mainLink.href = photoPage(p);
+      const nc = creditEl(p);
+      popEl.replaceChild(nc, creditNode);
+      creditNode = nc;
+    };
+
+    if (photos.length > 1) {
+      const strip = document.createElement("div");
+      strip.className = "tw-pop-thumbs";
+      photos.slice(0, 8).forEach((p, i) => {
+        const t = document.createElement("img");
+        t.className = "tw-pop-thumb" + (i === 0 ? " tw-sel" : "");
+        t.src = p.square_url || p.url; t.alt = ""; t.loading = "lazy";
+        const pick = () => {
+          applyPhoto(p);
+          strip.querySelectorAll(".tw-pop-thumb").forEach((x) => x.classList.remove("tw-sel"));
+          t.classList.add("tw-sel");
+        };
+        t.addEventListener("mouseenter", pick);
+        t.addEventListener("click", pick);
+        strip.appendChild(t);
+      });
+      popEl.appendChild(strip);
+    }
+  }
+
+  const body = document.createElement("div");
+  body.className = "tw-pop-body";
+  const title = document.createElement("div");
+  title.className = "tw-pop-title";
+  if (node.rank_level != null && node.rank_level <= 20) title.classList.add("tw-sci");
+  title.textContent = (node.rank && node.rank_level > 10 ? cap(node.rank) + " " : "") + (node.name || ("Taxon " + id));
+  body.appendChild(title);
+
+  if (node.preferred_common_name) {
+    const cn = document.createElement("div");
+    cn.className = "tw-pop-common";
+    cn.textContent = node.preferred_common_name;
+    body.appendChild(cn);
+  }
+  if (node.wikipedia_summary) {
+    const d = document.createElement("div");
+    d.className = "tw-pop-desc";
+    d.innerHTML = node.wikipedia_summary;   // iNat-provided Wikipedia extract
+    body.appendChild(d);
+
+    const src = document.createElement("div");
+    src.className = "tw-pop-src";
+    src.appendChild(document.createTextNode("Description from "));
+    const wiki = document.createElement("a");
+    wiki.target = "_blank"; wiki.rel = "noopener";
+    wiki.href = node.wikipedia_url ? node.wikipedia_url.replace(/ /g, "_") : "https://en.wikipedia.org/";
+    wiki.textContent = "Wikipedia";
+    src.appendChild(wiki);
+    src.appendChild(document.createTextNode(" · "));
+    const lic = document.createElement("a");
+    lic.href = "https://creativecommons.org/licenses/by-sa/4.0/";
+    lic.target = "_blank"; lic.rel = "noopener license";
+    lic.textContent = "CC BY-SA";
+    src.appendChild(lic);
+    body.appendChild(src);
+  } else if (!nodeHasDetail(node)) {
+    const d = document.createElement("div");
+    d.className = "tw-pop-common";
+    d.textContent = "Loading…";
+    body.appendChild(d);
+  }
+  const link = document.createElement("a");
+  link.className = "tw-pop-link";
+  link.href = "https://www.inaturalist.org/taxa/" + id;
+  link.target = "_blank"; link.rel = "noopener";
+  link.textContent = "View on iNaturalist →";
+  body.appendChild(link);
+  popEl.appendChild(body);
+}
+
+function positionPopover(anchor) {
+  const r = anchor.getBoundingClientRect();
+  const pw = popEl.offsetWidth, ph = popEl.offsetHeight;
+  let left = r.right + 12;
+  if (left + pw > window.innerWidth - 8) left = r.left - pw - 12;  // flip to the left
+  if (left < 8) left = 8;
+  let top = r.top;
+  if (top + ph > window.innerHeight - 8) top = window.innerHeight - ph - 8;
+  if (top < 8) top = 8;
+  popEl.style.left = left + "px";
+  popEl.style.top = top + "px";
+}
+
+// ---- theme toggle: sun/moon button, follows OS until clicked, then persisted ----
+(function initTheme() {
+  const btn = $("tw-theme-btn");
+  const SUN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>';
+  const mq = window.matchMedia("(prefers-color-scheme: dark)");
+  const effective = () => document.documentElement.getAttribute("data-theme") || (mq.matches ? "dark" : "light");
+  const render = () => {
+    const dark = effective() === "dark";
+    btn.innerHTML = dark ? SUN : MOON;
+    btn.title = dark ? "Switch to light theme" : "Switch to dark theme";
+  };
+  render();
+  btn.addEventListener("click", () => {
+    const next = effective() === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("tw-theme", next); } catch (e) {}
+    render();
+  });
+  // keep the icon right if the OS theme flips while we're still in auto mode
+  mq.addEventListener("change", () => { if (!document.documentElement.getAttribute("data-theme")) render(); });
+})();
+
+initFromUrl();
+</script>
+</body>
+</html>
