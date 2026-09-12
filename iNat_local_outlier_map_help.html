@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Help — Local outlier map</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; padding: 20px; max-width: 640px; line-height: 1.5; color: #333; }
+    h1 { font-size: 1.25rem; margin-bottom: 1em; }
+    h2 { font-size: 1rem; margin-top: 1.5em; margin-bottom: 0.35em; color: #111; }
+    h3 { font-size: 0.95rem; margin-top: 1.1em; margin-bottom: 0.3em; color: #555; }
+    p { margin: 0 0 0.75em 0; }
+    ul { margin: 0 0 0.75em 0; padding-left: 1.3em; }
+    li { margin-bottom: 0.4em; }
+    a { color: #74ac00; }
+    a:hover { text-decoration: underline; }
+    .back { display: inline-block; margin-bottom: 1em; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <a href="#" id="help-back-link" class="back">← Back to map</a>
+  <h1>Help</h1>
+
+  <h2>How does it work</h2>
+  <p>The tool is designed to highlight areas where the audited taxon is unusual. This may mean it’s misidentified, or it may be locally rare, or there may be data quality issues with particular observations. To determine where the audited taxon is rare, we compare the ratio of the audited taxon to other observations in the same area – specifically, observations of other taxa that are reasonably likely to be confused for the audited taxon. To determine what is reasonably likely to be confused for the audited taxon, we ask iNat for observations which carry an ID of the audited taxon, but which have an observation taxon that is something else. For example, an observation with three fox squirrel IDs and one eastern gray squirrel ID has fox squirrel as the observation taxon, and is carrying an eastern gray squirrel ID. The top section of the input panel constructs these “confusion sets”; the list of taxa reasonably likely to be confused for the audited taxon. This is called “seeding the confusion partners”. The lower section of the input panel then allows you to filter and modify the displayed cells to better focus on unusual locations and observations.</p>
+
+  <h2>How to use it</h2>
+
+  <h3>set comparison taxa</h3>
+  <ul>
+    <li>Select an example taxon, or type a taxon in the audited taxon lookup box</li>
+    <li>Optionally, change the confusion set to either the top 1/3/5 confusion partners, or a top percentage of confusions.</li>
+    <li>If you are auditing a rank other than species, or if you want to seed the confusion partners from a viewport, you must seed the confusions from current IDs. Otherwise, you can optionally seed from both current and withdrawn IDs (e.g. an observation with 3 active IDs of fox squirrel and 1 withdrawn ID of eastern gray would be in the second query, but not the first query). This is due to limitations of the iNat API. Seeding from current + withdrawn uses a different method and does *not* produce a superset of the current results.</li>
+    <li>After seeding the confusion partners, you can optionally add or remove other confusion taxa. Manually added taxa get removed on re-seed or on changing the confusion set dropdown (1/3/5/percent).</li>
+  </ul>
+
+  <h3>filter and draw cells</h3>
+  <ul>
+    <li>Each cell displays two things at once: a share (what fraction of the observations in the cell are the audited taxon rather than the confusion set), and a count (your choice of either the number of observations of the confusion set or the number of observations of the audited taxon). The share is displayed as color (with a choice of palettes), and the count is displayed as either intensity (higher count = darker) or square size (higher count = larger).</li>
+    <li>Changing the minimum confusion set count and/or the maximum share percent (by dragging the handles on the color ramp) allows you to filter out cells that are less unusual.</li>
+    <li>As you zoom in and out, the number of observations per cell will change. Setting the full visual value allows you to rescale the intensity/square size. Choose “fit” to auto-scale based on the currently visible cells.</li>
+    <li>You can optionally set limits to the observation location accuracy and quality grade.</li>
+    <li>Lock grid zoom allows you to fix the cells in place while zooming in and out.</li>
+    <li>Draw box allows you to do the same share calculations, but on an area of your choosing.</li>
+    <li>Refresh tiles requests freshly minted tiles from the iNat servers, bypassing the normal tile cache if the observations have recently changed. If the observations haven’t changed in the last hour, this is unnecessary.</li>
+    <li>After choosing a taxon, the bottom of the panel will display a diagnostic message (defaults to collapsed, click to expand). This message has information about how often observations of this taxon resolve vs end up at coarser ranks. It also alerts for taxa with higher than usual non-organism observations. The non-organism observations can optionally be filtered out, but note that many observations of sign are un-annotated. There is also an additional message if a confusion partner is also a taxon change partner, which inflates withdrawn ID counts.</li>
+    <li>In the displayed map, click a cell to learn more about the observations in it, and for a link to the Identify page for those observations.</li>
+    <li>In the upper right, there are additional optional map layers: different basemaps, observations of the confusion set, and a number of layers specific to the audited taxon.</li>
+  </ul>
+
+  <script>
+    // Framed in the map's modal, the back link closes it; opened on its own, it navigates.
+    document.getElementById('help-back-link').addEventListener('click', function(e) {
+      if (window !== window.parent) {
+        e.preventDefault();
+        window.parent.postMessage('closeHelpModal', '*');
+      } else {
+        this.href = 'iNat_local_outlier_map.html';
+      }
+    });
+  </script>
+</body>
+</html>

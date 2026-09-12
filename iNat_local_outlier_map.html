@@ -1,0 +1,2865 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local outlier map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  /* ---- page and map surface ---- */
+  html, body { margin:0; height:100%; font-family: system-ui, sans-serif; }
+  #map { position:absolute; inset:0; background:#2b2b2b; }
+  .basemap-muted { filter: grayscale(100%) brightness(1.12) contrast(0.75); }
+  .cell-tile { image-rendering: pixelated; }
+
+  /* ---- control panel shell ---- */
+  .panel {
+    position:absolute; top:10px; left:10px; z-index:1000; width:300px;
+    background:rgba(255,255,255,0.94); border-radius:6px; padding:10px 0;
+    box-shadow:0 2px 8px rgba(0,0,0,0.3); font-size:12px; line-height:1.45;
+    max-height:calc(100vh - 40px);
+    display:flex; flex-direction:column;
+  }
+  .panel-inner { overflow-y:auto; overflow-x:hidden; min-height:0; padding:0 12px; }
+  .panel h1 { font-size:13px; margin:0 0 8px; }
+  .panel h1 .help-link { float:right; font-size:11px; font-weight:400; color:#999; text-decoration:none; }
+  .panel h1 .help-link:hover { color:#222; text-decoration:underline; }
+  .panel label { display:block; margin:6px 0 2px; font-weight:600; color:#333; }
+  .panel input, .panel select { width:100%; box-sizing:border-box; font-size:12px; padding:3px 4px; }
+  .panel .row { display:flex; gap:6px; align-items:flex-end; }
+  .panel .row.top { align-items:flex-start; }
+  .panel .row > div { flex:1; }
+  .panel button { margin-top:10px; width:100%; box-sizing:border-box; padding:5px;
+                  font-size:12px; cursor:pointer; }
+  .panel.collapsed { width:80px; padding:0; overflow:hidden; }
+  .panel.collapsed .panel-inner { display:none; }
+  .panel .panel-tab { width:auto; margin:8px 12px 0; padding:4px 8px; background:#e8e8e8; color:#555;
+                      border:1px solid #bbb; border-radius:4px; font-size:12px; font-weight:600;
+                      line-height:1; text-align:center; }
+  .panel .panel-tab:hover { background:#ddd; color:#333; }
+  .panel.collapsed .panel-tab { margin:0; border-radius:6px; padding:8px; }
+  .band { margin:0 -12px 9px; padding:1px 12px 2px 6px; border-left:6px solid #bbb; }
+  .band-compare { border-left-color:#4f7cb5; }
+  .band-paint   { border-left-color:#9a6ea8; }
+  .panel .sect { font-weight:600; color:#555; font-size:11px; margin:6px 0 2px; }
+  .panel label .tip { color:#999; cursor:help; font-weight:400; margin-left:3px; }
+  .panel label .tip:hover { color:#222; }
+  .panel label .fit, .panel label .toggle { float:right; width:auto; margin:0; padding:1px 5px;
+                      font-size:11px; font-weight:400; line-height:1.4; cursor:pointer; color:#555;
+                      background:#e8e8e8; border:1px solid #bbb; border-radius:4px; }
+  .panel label .fit:hover, .panel label .toggle:hover { background:#ddd; color:#222; }
+  .panel label .fit.warn { color:#4a3000; background:#f7c948; border-color:#c99400;
+                           font-weight:600; }
+  .panel label .fit.warn:hover { background:#efbb2e; color:#3a2500; }
+  .panel label .toggle { margin-left:8px; }
+  .panel label .toggle.on { background:#e8f0fb; border-color:#7ea6dc; color:#1a4f8f; }
+  .panel .check { display:flex; align-items:center; gap:5px; margin:8px 0 2px; }
+  .panel .check input { width:auto; margin:0; }
+  .panel .check.off { color:#aaa; }
+  .panel .check[hidden] { display:none; }
+  .panel .check .lock-note { color:#888; font-weight:400; margin-left:4px; }
+  .check-row { display:flex; gap:6px; font-size:11px; margin-top:5px; }
+  .panel .check-row .check { margin:0; font-weight:400; }
+  .ramp { position:relative; height:12px; border-radius:2px; margin:4px 3px 1px; background:#ccc; }
+  .ramp .grip { position:absolute; top:-4px; width:5px; height:20px; margin-left:-2px; cursor:ew-resize;
+                background:#555; border:1px solid #fff; border-radius:2px;
+                box-shadow:0 0 0 1px rgba(0,0,0,0.3); }
+  .ramp-ticks { position:relative; height:11px; font-size:9px; color:#555; }
+  .ramp-ticks span { position:absolute; transform:translateX(-50%); white-space:nowrap; }
+  .ramp-labels { display:flex; justify-content:space-between; color:#555; font-size:10px; }
+  .ramp-row { display:flex; align-items:flex-start; gap:5px; margin-top:9px; }
+  .ramp-col { flex:1; min-width:0; }
+  .panel .pal-btn { display:flex; align-items:center; gap:3px; flex:0 0 auto; width:auto;
+                    margin:3px 0 0; padding:1px 2px; background:none; border:1px solid #bbb;
+                    border-radius:3px; cursor:pointer; }
+  .panel .pal-btn:hover { border-color:#888; }
+  .pal-sw { display:block; border-radius:2px; }
+  .pal-car { font-size:9px; line-height:1; color:#666; }
+  .pal-menu { display:none; position:fixed; z-index:1100; background:#fff; border:1px solid #bbb;
+              border-radius:4px; box-shadow:0 3px 10px rgba(0,0,0,0.25); padding:3px; }
+  .pal-menu.open { display:block; }
+  .panel .pal-menu button { display:flex; align-items:center; gap:6px; width:100%; margin:0;
+                            padding:3px 5px; border:0; border-radius:3px; background:none;
+                            font-size:11px; text-align:left; cursor:pointer; }
+  .panel .pal-menu button:hover:enabled { background:#e8f0fb; }
+  .panel .pal-menu button.sel { font-weight:600; }
+  .pal-menu .pal-sw { flex:0 0 auto; }
+  .seg { display:flex; gap:4px; margin:2px 0 0; }
+  .panel .seg button { flex:1; width:auto; display:flex; align-items:center;
+                       justify-content:center; gap:4px; margin:0; padding:3px 4px;
+                       border:1px solid #ccc; border-radius:3px; background:#f6f6f6;
+                       color:#555; font-size:11px; cursor:pointer; }
+  .panel .seg button:hover { background:#ececec; }
+  .panel .seg button.on { background:#e8f0fb; border-color:#7ea6dc; color:#1a4f8f;
+                          font-weight:600; }
+  #status { position:absolute; bottom:10px; left:10px; z-index:1000; font-size:11px;
+            background:rgba(255,255,255,0.9); padding:3px 7px; border-radius:3px; }
+  .lyr-group { font-weight:600; margin:4px 0 2px; }
+  .lyr-split { border-top:1px solid #ccc; margin-top:7px; padding-top:6px; }
+  .leaflet-control-layers-overlays .lyr-row { padding-left:10px; }
+  .leaflet-tooltip.cell-tip { font-size:12px; line-height:1.45; }
+  .leaflet-popup-content .pop-body { font-size:12px; line-height:1.5; }
+  .leaflet-container a.popup-others { right:24px; }
+  .popup-others svg { display:block; margin:5.5px auto; }
+  .leaflet-popup-content { margin-right:48px; }
+  .pop-body .bd { margin-top:6px; border-top:1px solid #ddd; padding-top:5px; }
+  .pop-body .bd-row { display:grid; grid-template-columns:1fr auto 3.2em; gap:6px;
+                       align-items:baseline; }
+  .pop-body .bd-row .n, .pop-body .bd-row .pc { text-align:right; font-variant-numeric:tabular-nums; }
+  .pop-body .bd-row .nm { overflow-wrap:anywhere; }
+  .pop-body .bd-row .rk { color:#777; }
+  .pop-body .bd-note { color:#666; margin-top:3px; }
+  .pop-body .bd-warn { color:#a00; }
+
+  /* ---- taxon autocomplete ---- */
+  .ac { position:relative; }
+  .ac-list {
+    display:none; position:fixed; z-index:1100;
+    background:#fff; border:1px solid #bbb; border-radius:4px;
+    overflow-y:auto; box-shadow:0 3px 10px rgba(0,0,0,0.25);
+  }
+  .ac-list.open { display:block; }
+  .ac-item { display:flex; align-items:center; gap:7px; padding:5px 6px;
+             cursor:pointer; border-bottom:1px solid #eee; }
+  .ac-item:last-child { border-bottom:0; }
+  .ac-item:hover, .ac-item.sel { background:#e8f0fb; }
+  .ac-item .thumb { width:34px; height:34px; border-radius:3px; object-fit:cover;
+                    flex:0 0 auto; background:#e4e4e4; }
+  .ac-item .txt { flex:1; min-width:0; }
+  .ac-item .sci { display:block; font-style:italic; color:#222;
+                  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ac-item .meta { color:#777; font-size:10px;
+                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ac-item .cnt { color:#999; font-size:10px; flex:0 0 auto; }
+  .panel .ac input { padding:3px 20px 3px 5px; }
+  .panel .ac.has-thumb input { padding-left:26px; }
+  .ac-thumb { position:absolute; left:3px; top:50%; transform:translateY(-50%);
+              width:19px; height:19px; border-radius:3px; object-fit:cover;
+              background:#e4e4e4; cursor:help; }
+  .panel .ac-x { position:absolute; right:2px; top:50%; transform:translateY(-50%);
+                 width:16px; height:16px; margin:0; padding:0; border:0; background:none;
+                 color:#999; font-size:14px; line-height:16px; text-align:center; cursor:pointer; }
+  .panel .ac-x:hover { color:#c00; }
+
+  /* ---- denominator set chips ---- */
+  .chips { display:flex; flex-wrap:wrap; align-content:flex-start; gap:4px;
+           height:74px; overflow-y:auto; margin:5px 0 2px;
+           border:1px solid #e0e0e0; border-radius:4px; padding:3px; }
+  .chip { display:inline-flex; align-items:center; gap:4px; max-width:100%;
+          background:#eef2f7; border:1px solid #c9d4e2; border-radius:10px;
+          padding:1px 3px 1px 2px; font-size:11px; line-height:1.6; }
+  .chip img { width:15px; height:15px; border-radius:50%; object-fit:cover;
+              background:#dde; flex:0 0 auto; cursor:help; }
+  .chip .nm { font-style:italic; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .chip .n { color:#8a97a8; text-decoration:none; }
+  .chip a.n:hover { color:#1a5fb4; text-decoration:underline; }
+  .panel .chip button { width:13px; height:13px; margin:0; padding:0; border:0; background:none;
+                        color:#8a97a8; font-size:13px; line-height:11px; text-align:center;
+                        cursor:pointer; flex:0 0 auto; }
+  .panel .chip button:hover { color:#c00; }
+  .chips .empty { color:#a00; font-size:11px; }
+  .chips .empty.wait { color:#999; }
+
+  /* ---- taxon diagnostic ---- */
+  .diag { margin-top:7px; font-size:11px; line-height:1.4; color:#555;
+          background:#f0f2f5; border:1px solid #dfe3e8; border-radius:4px; padding:4px 6px; }
+  .diag:empty { display:none; }
+  .diag.warn { color:#7a4a00; background:#fdf6e7; border-color:#eedcb3; }
+  .diag .d-key { font-weight:600; }
+  .diag .d-why { margin-top:2px; }
+  .panel .diag .d-sum { display:flex; align-items:baseline; gap:4px; width:100%; margin:0;
+                        padding:0; border:0; background:none; font:inherit; color:inherit;
+                        text-align:left; cursor:pointer; }
+  .panel .diag .d-sum:hover { color:#222; }
+  .diag .d-caret { display:inline-block; margin-left:auto; color:#999; }
+  .diag.open .d-caret { transform:rotate(90deg); }
+  .diag .d-body { display:none; }
+  .diag.open .d-body { display:block; margin-top:3px; }
+
+  /* ---- taxon hover card ---- */
+  #taxcard { position:fixed; z-index:1200; width:230px; display:none; overflow:hidden;
+             background:#fff; border:1px solid #bbb; border-radius:6px; font-size:12px;
+             line-height:1.45; box-shadow:0 6px 20px rgba(0,0,0,0.25); }
+  #taxcard.open { display:block; }
+  #taxcard .photo { width:100%; aspect-ratio:1; object-fit:cover; display:block; background:#eee; }
+  #taxcard .attr { font-size:9px; color:#777; padding:3px 8px 0; line-height:1.3; }
+  #taxcard .attr a { color:inherit; }
+  #taxcard .body { padding:6px 8px 8px; }
+  #taxcard .sci { font-size:13px; }
+  #taxcard .sci.italic { font-style:italic; }
+  #taxcard .common { color:#666; }
+  #taxcard .meta { color:#888; font-size:11px; margin-top:2px; }
+  #taxcard .more { display:block; margin-top:5px; color:#1a5fb4; text-decoration:none; }
+  #taxcard .more:hover { text-decoration:underline; }
+  .panel .swap { margin-top:4px; padding:3px; font-size:11px; }
+  .panel button:disabled { opacity:0.45; cursor:default; }
+
+  /* ---- help modal ---- */
+  .help-modal { display:none; position:fixed; inset:0; z-index:2000; align-items:center;
+                justify-content:center; padding:20px; box-sizing:border-box; }
+  .help-modal.open { display:flex; }
+  .help-modal-overlay { position:absolute; inset:0; background:rgba(0,0,0,0.5); cursor:pointer; }
+  .help-modal-box { position:relative; width:100%; max-width:680px; max-height:90vh; background:#fff;
+                    border-radius:8px; box-shadow:0 4px 24px rgba(0,0,0,0.25); }
+  .help-modal-close { position:absolute; top:8px; right:8px; z-index:1; width:32px; height:32px;
+                      padding:0; border:0; border-radius:6px; background:#e8e8e8; color:#555;
+                      font-size:20px; line-height:1; cursor:pointer; }
+  .help-modal-close:hover { background:#ddd; color:#333; }
+  .help-modal-box iframe { display:block; width:100%; height:80vh; min-height:400px; border:0;
+                           border-radius:8px; }
+
+  /* ---- pinned actions ---- */
+  .panel-foot { flex:0 0 auto; border-top:1px solid #ddd; margin:8px 12px 0; padding-top:7px; }
+  .panel.collapsed .panel-foot { display:none; }
+  .panel .panel-foot button { margin-top:0; }
+  .btn-row { display:flex; flex-wrap:wrap; gap:5px; }
+  .panel .btn-row button { flex:1 1 auto; width:auto; min-width:0; }
+  .panel .btn-row.even button { flex-basis:0; }
+  .panel .btn-row button.copied { color:#2e7d32; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<!-- ==== control panel ==== -->
+<div class="panel" id="panel">
+  <div class="panel-inner">
+  <h1>Local outlier map<a href="#" class="help-link" id="helpOpen">help</a></h1>
+
+  <!-- ==== two bands: what is compared, and how the cells are filtered and drawn -->
+  <div class="band band-compare">
+  <div class="sect">set comparison taxa</div>
+
+  <!-- ==== the audited taxon ==== -->
+  <label for="in_preset">Examples</label>
+  <select id="in_preset">
+    <option value="">&mdash; pick a taxon, or type below &mdash;</option>
+    <option value="46017">Eastern Gray Squirrel</option>
+    <option value="42888">Eastern Grey Kangaroo</option>
+    <option value="5212">Red-tailed Hawk</option>
+    <option value="64968">American Toad</option>
+    <option value="43794">American Beaver</option>
+    <option value="28362">Common Garter Snake</option>
+    <option value="55990">Common Wall Lizard</option>
+    <option value="48548">Painted Lady</option>
+    <option value="4270">Great Cormorant</option>
+    <option value="69756">Atlantic White Cedar</option>
+  </select>
+  <label for="in_a">Audited taxon<button type="button" class="toggle" id="autofit"
+      aria-pressed="false" title="Auto-fit the map when setting a new audited taxon."
+      >auto</button><button type="button" class="fit" id="fitview"
+      title="Fit the map to this taxon's observations."
+      >&#10530; fit</button></label>
+  <div class="ac" id="wrap_a">
+    <img class="ac-thumb" id="th_a" alt="" hidden>
+    <input id="in_a" placeholder="type a species name&hellip;" autocomplete="off">
+    <button type="button" class="ac-x" id="x_a" title="Clear"
+        aria-label="Clear audited taxon" hidden>&times;</button>
+    <div class="ac-list" id="ac_a"></div>
+  </div>
+
+  <!-- ==== the denominator set ==== -->
+  <label for="in_seed">Confusion set<span class="tip"
+      title="Taxa confused with the audited taxon. Measured as observations of the confusion taxon which also carry an identification of the audited taxon."
+      >&#9432;</span></label>
+  <select id="in_seed">
+    <option value="cumul:0.8">top 80% of confusions</option>
+    <option value="cumul:0.9">top 90% of confusions</option>
+    <option value="cumul:0.95">top 95% of confusions</option>
+    <option value="top:1">most-confused taxon only</option>
+    <option value="top:3">top 3 taxa</option>
+    <option value="top:5">top 5 taxa</option>
+  </select>
+  <label>Seed confusion partners from<span class="tip"
+      title="Which identifications of the audited taxon count. Current + withdrawn is only available globally and at rank species."
+      >&#9432;</span></label>
+  <div class="seg" id="seg_seedsrc"></div>
+  <div class="chips" id="chips"></div>
+  <div class="ac" id="wrap_add">
+    <input id="in_add" placeholder="add another taxon&hellip;" autocomplete="off">
+    <div class="ac-list" id="ac_add"></div>
+  </div>
+  <div class="btn-row even">
+    <button class="swap" id="reseed"
+        title="Discard all current seeds and re-seed from the audited taxon's global confusions."
+        >&#8635; re-seed</button>
+    <button class="swap" id="reseed_view"
+        title="Discard all current seeds and re-seed from the audited taxon's confusions inside the current viewport. Use it where a locally important confusion is outranked globally. Only available with current IDs."
+        >&#8635; re-seed in view</button>
+  </div>
+
+  </div>
+
+  <!-- ==== the cells ==== -->
+  <div class="band band-paint">
+  <div class="sect">filter and draw cells</div>
+  <label>Cell count<span class="tip" title="Select which count sets the cell value."
+      >&#9432;</span></label>
+  <div class="seg" id="seg_countaxis"></div>
+  <label>Show as<span class="tip"
+      title="Show the cell count as color intensity or square size."
+      >&#9432;</span></label>
+  <div class="seg" id="seg_channel"></div>
+
+  <!-- ==== the share band the color spans ==== -->
+  <div class="ramp-row">
+    <div class="ramp-col">
+      <div class="ramp" id="ramp"><div class="grip" id="grip_lo"></div><div class="grip" id="grip_hi"></div></div>
+      <div class="ramp-ticks" id="ramp_ticks"></div>
+      <div class="ramp-labels"><span>all confusion set</span><span id="lbl_a">all</span></div>
+    </div>
+    <button type="button" class="pal-btn" id="pal_btn" title="Color ramp" aria-haspopup="true"
+      ><span class="pal-sw" id="pal_sw"></span><span class="pal-car">&#9662;</span></button>
+  </div>
+  <div class="pal-menu" id="pal_menu"></div>
+
+  <!-- ==== which cells count, and how the count scales ==== -->
+  <div class="row">
+    <div><label for="in_minset">Min set<span class="tip"
+        title="Cells holding fewer confusion-set observations than this are left blank."
+        >&#9432;</span></label><input id="in_minset" type="number" min="0"></div>
+    <div><label for="in_countcap">Full visual at<span class="tip"
+        title="The count at which the cell reaches full intensity/full size. Above this, every cell is at maximum, below this, the cells scale by their count."
+        >&#9432;</span><button type="button" class="fit" id="fitcap"
+        title="Re-scale according to the values of the cells in the current viewport."
+        >&#8597; fit</button></label><input id="in_countcap" type="number" min="2"></div>
+  </div>
+  <div class="row top">
+    <div><label for="in_acc">Max uncertainty (m)<span class="tip"
+        title="Keep only observations with uncertainty below this, or with no uncertainty value. Cannot be raised beyond mappable, which is ~31 km at the equator, less toward the poles."
+        >&#9432;</span></label><input id="in_acc" type="number" min="1" step="1"
+        placeholder="mappable"></div>
+    <div><label>Quality grade</label>
+      <div class="check-row" id="qg_checks"></div>
+    </div>
+  </div>
+  <label class="check" id="lbl_nosign" for="in_nosign" hidden
+      ><input type="checkbox" id="in_nosign">Exclude annotated sign<span class="tip"
+      title="Drop observations annotated as tracks, scat, bone, etc."
+      >&#9432;</span></label>
+
+  <label class="check" id="lbl_lock" for="in_lock"
+      ><input type="checkbox" id="in_lock">Lock grid zoom<span class="tip"
+      title="Freeze the cells at the current zoom, so zooming in magnifies them instead of recomputing a finer grid. Zooming out past the locked level goes back to following the map."
+      >&#9432;</span><span class="lock-note" id="lock_note"></span></label>
+  </div>
+
+  </div>
+
+  <!-- ==== actions ==== -->
+  <div class="panel-foot">
+    <div class="btn-row">
+      <button class="swap" id="drawbox"
+          title="Drag a rectangle to count a whole region instead of one cell."
+          >&#9645; draw box</button>
+      <button class="swap" id="refresh"
+          title="Bypass tile cache and fetch new tiles. Useful after you've made correcting IDs."
+          >&#8635; refresh tiles</button>
+      <button class="swap" id="copyShare" title="Copy a link to the current view"
+          >&#10697; share link</button>
+    </div>
+    <div class="diag" id="diag"></div>
+  </div>
+  <button type="button" class="panel-tab" id="panelToggle" title="Collapse panel">&#94;</button>
+</div>
+
+<!-- Filled from JS: the seed/throttle line, and the taxon hover card. -->
+<div id="status" hidden></div>
+<div id="taxcard"></div>
+<div class="help-modal" id="helpModal" role="dialog" aria-modal="true" aria-label="Help" aria-hidden="true">
+  <div class="help-modal-overlay" id="helpModalOverlay"></div>
+  <div class="help-modal-box">
+    <button type="button" class="help-modal-close" id="helpModalClose" aria-label="Close help">&times;</button>
+    <iframe id="helpIframe" title="Help"></iframe>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+
+// ---- settings from the URL -----------------------------------------------
+// CFG is what this page decides, FILTERS what is handed to the API untouched;
+// syncUrl writes both back.
+var qs = new URLSearchParams(location.search);
+function clamped(k, d, lo, hi) { var v = parseFloat(qs.get(k)); return v >= lo && v <= hi ? v : d; }
+function oneOf(k, allowed, d) { var v = qs.get(k); return allowed.indexOf(v) === -1 ? d : v; }
+function taxonParam(k, d) { var v = qs.get(k); return /^\d+$/.test(v || "") ? v : d; }
+function intOrNull(k, lo, hi) { var v = parseInt(qs.get(k), 10); return v >= lo && v <= hi ? v : null; }
+// null means no set in the link, which seeds on load; an explicitly empty list stays empty
+function setParam(k) {
+  var v = qs.get(k);
+  if (v == null) return null;
+  return v.split(",").filter(function (s) { return /^\d+$/.test(s); });
+}
+
+// set defaults
+var CFG = {
+  taxonA:    taxonParam("taxon_id", "46017"),       // Eastern Gray Squirrel
+  setIds:    setParam("taxon_set"),                 // null until seeded
+  seed:      oneOf("seed", ["cumul:0.8", "cumul:0.9", "cumul:0.95", "top:1", "top:3", "top:5"], "top:5"),
+  withdrawn: oneOf("withdrawn", ["0", "1"], "0") === "1",
+  countAxis: oneOf("count_axis", ["audited", "set"], "set"),
+  palette:      qs.get("palette"),
+  countChannel: oneOf("count_channel", ["intensity", "size"], "intensity"),
+  fitView:      oneOf("fit_view", ["0", "1"], "1") === "1",
+  countCap:  clamped("count_cap", 100, 2, 1e7),
+  minSet:    clamped("min_set", 1, 0, 1e7),
+  // Cells outside the default share band are hidden.
+  minShare:  clamped("min_share", 0, 0, 100),
+  maxShare:  clamped("max_share", 25, 0, 100),
+  // Zoom the cells are frozen at, or null to follow the map.
+  gridZoom:  intOrNull("grid_zoom", 0, 20),
+  lat:       clamped("lat", 36, -85, 85),
+  lng:       clamped("lng", -90, -180, 180),
+  zoom:      clamped("zoom", 6, 0, 20)
+};
+CFG.minShare = Math.round(CFG.minShare * 10) / 10;
+CFG.maxShare = Math.round(CFG.maxShare * 10) / 10;
+if (CFG.minShare >= CFG.maxShare) { CFG.minShare = 0; CFG.maxShare = 100; }
+if (CFG.setIds) CFG.setIds = CFG.setIds.filter(function (id) { return id !== CFG.taxonA; });
+
+var MIN_AUDITED = 1;
+
+// Passed to both queries and the click-through links, so map and list agree.
+var PASSTHROUGH = ["quality_grade","verifiable","captive","d1","d2","created_d1","created_d2",
+                   "place_id","month","year","geoprivacy","acc_below","acc_below_or_unknown",
+                   "licensed","user_id","mappable","spam",
+                   "term_id_or_unknown","without_term_value_id"];
+// Evidence of Presence (22), values other than Organism (24)
+var SIGN_TERM = "22", SIGN_VALUES = "23,25,26,27,28,29,30,31,32,35";
+var FILTERS = {};
+PASSTHROUGH.forEach(function (k) { if (qs.get(k)) FILTERS[k] = qs.get(k); });
+
+function baseFilters() {
+  var p = new URLSearchParams();
+  PASSTHROUGH.forEach(function (k) { if (FILTERS[k]) p.set(k, FILTERS[k]); });
+  if (!p.has("verifiable") && !p.has("quality_grade")) p.set("verifiable", "true");
+  // Tiles apply mappable=true silently, so counts and links must too.
+  if (!p.has("mappable")) p.set("mappable", "true");
+  // The API defaults to spam=any, Explore and Identify to spam=false.
+  if (!p.has("spam")) p.set("spam", "false");
+  return p;
+}
+function seedFilters() {
+  var p = baseFilters();
+  ["quality_grade", "acc_below", "acc_below_or_unknown",
+   "term_id_or_unknown", "without_term_value_id"].forEach(function (k) { p.delete(k); });
+  p.set("verifiable", "true");
+  return p;
+}
+function signExcluded() { return FILTERS.term_id_or_unknown === SIGN_TERM; }
+function setSignExcluded(on) {
+  if (!on) { delete FILTERS.term_id_or_unknown; delete FILTERS.without_term_value_id; return; }
+  FILTERS.term_id_or_unknown = SIGN_TERM;
+  FILTERS.without_term_value_id = SIGN_VALUES;
+}
+
+// The two sides the tiles, overlays and Identify links are built from.
+function sideParams(side) {
+  var p = baseFilters();
+  if (side === "a") { p.set("taxon_id", CFG.taxonA); return p; }
+  if (!setIds().length) return null;
+  p.set("taxon_id", setIds().join(","));
+  p.set("without_taxon_id", CFG.taxonA);
+  return p;
+}
+function setIds() { return CFG.setIds || []; }
+
+function gridUrl(side) {
+  var p = sideParams(side);
+  if (!p) return null;
+  return "https://api.inaturalist.org/v2/grid/{z}/{x}/{y}.grid.json?" + p.toString();
+}
+
+// ---- request queue -------------------------------------------------------
+// Two fetches per tile
+var MAX_CONCURRENT = 6, inflight = 0, queue = [], throttled = 0, gaveUp = 0;
+function schedule(fn) {
+  return new Promise(function (resolve) { queue.push({ fn: fn, resolve: resolve }); pump(); });
+}
+function pump() {
+  while (inflight < MAX_CONCURRENT && queue.length) {
+    var task = queue.shift();
+    inflight++;
+    task.fn().then(task.resolve, function () { task.resolve(null); })
+      .then(function () { inflight--; pump(); });
+  }
+}
+// A 429 has no Retry-After and an HTML body, so back off on a fixed schedule.
+var RETRY_MS = [1200, 3000, 6000];
+// Every call goes through here and resolves null on any failure, so callers test
+// the result rather than catching.
+function retryJson(url, signal) {
+  function attempt(n) {
+    return fetch(url, { signal: signal }).then(function (r) {
+      if (r.status !== 429) return r.ok ? r.json() : null;
+      throttled++; setStatus();                   // body is HTML, never parse it
+      if (n >= RETRY_MS.length) return null;
+      return new Promise(function (s) { setTimeout(s, RETRY_MS[n]); })
+        .then(function () { return attempt(n + 1); });
+    });
+  }
+  return attempt(0).catch(function () { return null; });
+}
+// Tiles alone are counted: Leaflet treats a blank tile as loaded and never retries
+// it, and a blank cell reads as an empty one.
+function fetchGrid(url, signal) {
+  return schedule(function () {
+    return retryJson(url, signal).then(function (j) {
+      // Aborting a tile that scrolled away is deliberate, not a give-up.
+      if (!j && !signal.aborted) { gaveUp++; setStatus(); }
+      return j;
+    });
+  });
+}
+
+// ---- color --------------------------------------------------------------
+// A cell's two counts become a fill: the ratio picks a point on the palette, the
+// count drives the chosen channel. `b` is ΣB, the whole set summed.
+function countOf(c) { return CFG.countAxis === "set" ? c.b : c.a; }
+// Gamma < 1 spends most of the palette on the narrow band above 0 where the target
+// cells live. One exponent for both the palette and the ramp's position axis, so a
+// share sits where its color does.
+var CURVE = 0.5;
+function posOf(sharePct) { return Math.pow(Math.max(0, Math.min(1, sharePct / 100)), CURVE); }
+function shareAtPos(f) { return 100 * Math.pow(Math.max(0, Math.min(1, f)), 1 / CURVE); }
+function shareT(ratio) {
+  var lo = CFG.minShare / 100, span = CFG.maxShare / 100 - lo;
+  return posOf(span > 0 ? 100 * (ratio - lo) / span : 0);
+}
+
+var PALETTES = {
+  cividis: [[0,32,77],[0,51,111],[57,72,107],[87,93,109],[112,113,115],
+            [138,135,121],[166,157,117],[196,181,108],[228,207,91],[255,234,70]],
+  redblue: [[25,75,170],[62,76,140],[85,78,85],[135,68,62],[200,55,50]],
+  viridis: [[68,1,84],[71,45,123],[59,82,139],[44,114,142],[33,145,140],
+            [39,173,129],[94,201,98],[170,220,50],[253,231,37]],
+  bluewhite: [[8,48,107],[8,81,156],[33,113,181],[66,146,197],[107,174,214],
+              [158,202,225],[198,219,239],[222,235,247],[247,251,255]],
+  purplewhite: [[63,0,125],[84,39,143],[106,81,163],[128,125,186],[158,154,200],
+                [188,189,220],[218,218,235],[239,237,245],[252,251,253]],
+  rainbow: null                          // generated below, not a stop list
+};
+function hslRgb(h, s, l) {
+  var c = (1 - Math.abs(2 * l - 1)) * s, hp = (((h % 360) + 360) % 360) / 60;
+  var x = c * (1 - Math.abs(hp % 2 - 1)), m = l - c / 2, v;
+  if (hp < 1) v = [c, x, 0]; else if (hp < 2) v = [x, c, 0]; else if (hp < 3) v = [0, c, x];
+  else if (hp < 4) v = [0, x, c]; else if (hp < 5) v = [x, 0, c]; else v = [c, 0, x];
+  return [(v[0] + m) * 255, (v[1] + m) * 255, (v[2] + m) * 255];
+}
+function colorAt(name, t) {
+  var u = Math.max(0, Math.min(1, t));
+  var s = PALETTES[name];
+  if (!s) return hslRgb(240 * (1 - u), 0.85, 0.5);       // rainbow
+  var p = u * (s.length - 1), i = Math.min(s.length - 2, Math.floor(p)), f = p - i;
+  return [s[i][0] + (s[i + 1][0] - s[i][0]) * f,
+          s[i][1] + (s[i + 1][1] - s[i][1]) * f,
+          s[i][2] + (s[i + 1][2] - s[i][2]) * f];
+}
+function rampColor(t) { return colorAt(CFG.palette, t); }
+function rgbCss(v) {
+  return Math.round(v[0]) + "," + Math.round(v[1]) + "," + Math.round(v[2]);
+}
+// The intensity channel
+var TINT_MIN = 0.18;
+function tint(rgb, k) {
+  return [238 + (rgb[0] - 238) * k, 238 + (rgb[1] - 238) * k, 238 + (rgb[2] - 238) * k];
+}
+function tintK(t) { return TINT_MIN + (1 - TINT_MIN) * t; }
+
+function canvasEl(w, h) {
+  var cv = document.createElement("canvas");
+  cv.className = "pal-sw";
+  cv.width = w * 2; cv.height = h * 2;
+  cv.style.width = w + "px"; cv.style.height = h + "px";
+  return cv;
+}
+// the ramp
+function swatchEl(name, w, h) {
+  var cv = canvasEl(w, h), ctx = cv.getContext("2d");
+  for (var x = 0; x < cv.width; x++) {
+    ctx.fillStyle = "rgb(" + rgbCss(colorAt(name, x / (cv.width - 1))) + ")";
+    ctx.fillRect(x, 0, 1, cv.height);
+  }
+  return cv;
+}
+var ICON_RGB = [64, 96, 148];
+function iconEl(channel, w, h) {
+  var cv = canvasEl(w, h), ctx = cv.getContext("2d");
+  var n = 3, step = cv.width / n, box = step * 0.66, size = channel === "size";
+  for (var i = 0; i < n; i++) {
+    var f = (i + 1) / n;
+    var s = Math.round(size ? box * (0.45 + 0.55 * f) : box);
+    ctx.fillStyle = "rgb(" + rgbCss(size ? ICON_RGB : tint(ICON_RGB, tintK(f))) + ")";
+    ctx.fillRect(Math.round(i * step + (step - s) / 2), Math.round((cv.height - s) / 2), s, s);
+  }
+  return cv;
+}
+
+function countFloor() {
+  return CFG.countAxis === "set" ? CFG.minSet : MIN_AUDITED;
+}
+function countStrength(c) {
+  var lo = Math.log10(countFloor() + 1), hi = Math.log10(CFG.countCap + 1);
+  return hi > lo
+    ? Math.min(1, Math.max(0, (Math.log10(countOf(c) + 1) - lo) / (hi - lo)))
+    : 1;
+}
+
+// The measured ratio, undiscounted
+function shareOf(c) {
+  var total = c.a + c.b;
+  return total ? c.a / total : 0;
+}
+function cellFill(c) {
+  var rgb = rampColor(shareT(shareOf(c)));
+  if (CFG.countChannel === "intensity")
+    return "rgb(" + rgbCss(tint(rgb, tintK(countStrength(c)))) + ")";
+  return "rgb(" + rgbCss(rgb) + ")";
+}
+function cellScale(c) {
+  return CFG.countChannel === "size" ? Math.sqrt(0.06 + 0.94 * countStrength(c)) : 1;
+}
+
+function renderRamp() {
+  // the palette is compressed into the active part of the band
+  var lo = posOf(CFG.minShare), hi = posOf(CFG.maxShare), dead = "#dcdcdc";
+  var stops = [dead + " 0%", dead + " " + (lo * 100).toFixed(2) + "%"];
+  for (var i = 0; i <= 40; i++) {
+    var f = lo + (hi - lo) * (i / 40);
+    stops.push("rgb(" + rgbCss(rampColor(shareT(shareAtPos(f) / 100))) + ") " +
+               (f * 100).toFixed(2) + "%");
+  }
+  stops.push(dead + " " + (hi * 100).toFixed(2) + "%", dead + " 100%");
+  document.getElementById("ramp").style.background = "linear-gradient(to right," + stops.join(",") + ")";
+  placeGrips();
+  var ticks = document.getElementById("ramp_ticks");
+  if (ticks.firstChild) return;
+  // Weighted to the low end
+  [0, 1, 5, 25, 100].forEach(function (pct) {
+    var s = document.createElement("span");
+    s.style.left = (posOf(pct) * 100).toFixed(2) + "%";
+    s.style.transform = pct === 0 ? "translateX(0)" : pct === 100 ? "translateX(-100%)" : "";
+    s.textContent = pct + "%";
+    ticks.appendChild(s);
+  });
+}
+
+// ---- palette picker ------------------------------------------------------
+var PAL_LABELS = { cividis: "blue → yellow", viridis: "viridis",
+                   redblue: "blue → red", rainbow: "rainbow",
+                   bluewhite: "blue → white", purplewhite: "purple → white" };
+var CHANNEL_LABEL = { intensity: "intensity", size: "square size" };
+var CHANNEL_TIP = {
+  intensity: "A low-count cell fades toward pale; a high-count cell reaches full color.",
+  size: "A low-count cell shrinks to a smaller square; a high-count cell fills its whole cell."
+};
+// A single-hue ramp ends at the pale neutral that intensity fades to, so its count
+// has to come from area instead.
+var SINGLE_HUE = { bluewhite: 1, purplewhite: 1 };
+function paletteOk(name) {
+  return CFG.countChannel !== "intensity" || !SINGLE_HUE[name];
+}
+var PAL_FALLBACK = { bluewhite: "cividis", purplewhite: "viridis" };
+if (!PAL_LABELS[CFG.palette]) CFG.palette = "viridis";
+if (!paletteOk(CFG.palette)) CFG.countChannel = "size";
+var palBtn = document.getElementById("pal_btn"), palMenu = document.getElementById("pal_menu");
+function syncPaletteBtn() {
+  var old = document.getElementById("pal_sw"), cv = swatchEl(CFG.palette, 26, 10);
+  cv.id = "pal_sw";
+  old.parentNode.replaceChild(cv, old);
+  palBtn.title = "Color ramp: " + PAL_LABELS[CFG.palette];
+}
+function renderSeg(id, opts, on, pick) {
+  var box = document.getElementById(id);
+  box.innerHTML = "";
+  opts.forEach(function (o) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = o.value === on ? "on" : "";
+    b.title = o.title;
+    if (o.off) { b.disabled = true; b.title = o.off; }   // o.off is the reason
+    if (o.icon) b.appendChild(o.icon());
+    b.appendChild(document.createTextNode(o.label));
+    b.addEventListener("click", function () { if (o.value !== on) pick(o.value); });
+    box.appendChild(b);
+  });
+}
+function renderChannelSeg() {
+  renderSeg("seg_channel", Object.keys(CHANNEL_LABEL).map(function (ch) {
+    return { value: ch, label: CHANNEL_LABEL[ch], title: CHANNEL_TIP[ch],
+             icon: function () { return iconEl(ch, 24, 11); } };
+  }), CFG.countChannel, function (ch) {
+    CFG.countChannel = ch;
+    if (!paletteOk(CFG.palette)) CFG.palette = PAL_FALLBACK[CFG.palette] || "viridis";
+    renderChannelSeg();
+    syncPaletteBtn();
+    repaintAll();
+  });
+}
+function closePalMenu() { palMenu.classList.remove("open"); }
+function openPalMenu() {
+  palMenu.innerHTML = "";
+  Object.keys(PAL_LABELS).forEach(function (name) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = name === CFG.palette ? "sel" : "";
+    b.appendChild(swatchEl(name, 36, 11));
+    b.appendChild(document.createTextNode(PAL_LABELS[name]));
+    if (!paletteOk(name)) {
+      b.disabled = true;
+      b.title = "Switch “Show as” to square size to use.";
+    } else {
+      b.addEventListener("click", function () {
+        CFG.palette = name;
+        syncPaletteBtn();
+        closePalMenu();
+        repaintAll();
+      });
+    }
+    palMenu.appendChild(b);
+  });
+  palMenu.classList.add("open");
+  var r = palBtn.getBoundingClientRect();
+  palMenu.style.top = (r.bottom + 3) + "px";
+  palMenu.style.left = Math.max(6, Math.min(r.right - palMenu.offsetWidth,
+                                            window.innerWidth - palMenu.offsetWidth - 6)) + "px";
+}
+palBtn.addEventListener("click", function (e) {
+  e.stopPropagation();
+  if (palMenu.classList.contains("open")) closePalMenu(); else openPalMenu();
+});
+document.addEventListener("click", function (e) {
+  if (!palMenu.contains(e.target)) closePalMenu();
+});
+document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePalMenu(); });
+document.querySelector(".panel-inner").addEventListener("scroll", closePalMenu);
+window.addEventListener("resize", closePalMenu);
+
+// ---- share band handles --------------------------------------------------
+// Appearance changes that skip applyPanel land here; nothing is refetched.
+function repaintAll() {
+  renderRamp();
+  if (layer) layer.repaint();
+  styleBox(boxRect);
+  syncUrl();
+  syncFitButton();
+}
+function placeGrips() {
+  document.getElementById("grip_lo").style.left = (posOf(CFG.minShare) * 100).toFixed(2) + "%";
+  document.getElementById("grip_hi").style.left = (posOf(CFG.maxShare) * 100).toFixed(2) + "%";
+}
+// Dragging redraws the ramp live and repaints on release.
+function dragGrip(id, key, other, sign) {
+  document.getElementById(id).addEventListener("mousedown", function (e) {
+    e.preventDefault();
+    var bar = document.getElementById("ramp");
+    function move(ev) {
+      var r = bar.getBoundingClientRect();
+      // Pixels are in the warped axis, so they come back through it to a share.
+      var pct = shareAtPos((ev.clientX - r.left) / r.width);
+      // A zero-width band could not be grabbed apart again.
+      var v = sign > 0 ? Math.min(pct, CFG[other] - 1) : Math.max(pct, CFG[other] + 1);
+      CFG[key] = Math.max(0, Math.min(100, Math.round(v * 10) / 10));
+      renderRamp();
+    }
+    function up() {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      repaintAll();
+    }
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+dragGrip("grip_lo", "minShare", "maxShare", 1);
+dragGrip("grip_hi", "maxShare", "minShare", -1);
+document.getElementById("ramp").addEventListener("dblclick", function () {
+  CFG.minShare = 0; CFG.maxShare = 100;
+  repaintAll();
+});
+
+// ---- layer ---------------------------------------------------------------
+function drawable(c) {
+  if (!c) return false;
+  var total = c.a + c.b;
+  if (c.a < MIN_AUDITED || c.b < CFG.minSet) return false;
+  var n = c.a * 1000;
+  return n >= total * Math.round(CFG.minShare * 10) &&
+         n <= total * Math.round(CFG.maxShare * 10);
+}
+
+// cell borders, to keep cells more visible over base map
+function cellEdge(c) {
+  var rgb = rampColor(shareT(shareOf(c))).map(function (x) { return x * 0.55; });
+  return "rgb(" + rgbCss(tint(rgb, Math.max(0.5, tintK(countStrength(c))))) + ")";
+}
+
+function paintTile(canvas, td, size) {
+  var ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, size, size);
+  // A layer alpha, so the basemap stays readable under opaque cells.
+  ctx.globalAlpha = 0.85;
+  for (var r = 0; r < td.rows; r++) {
+    for (var q = 0; q < td.cols; q++) {
+      var c = td.cells[r][q];
+      if (!drawable(c)) continue;
+      // Integer edges, or neighbors leave a seam or double-paint a strip.
+      var x0 = Math.round(q * td.cellW), y0 = Math.round(r * td.cellH);
+      var x1 = Math.round((q + 1) * td.cellW), y1 = Math.round((r + 1) * td.cellH);
+      var w = x1 - x0, h = y1 - y0, k = cellScale(c);
+      ctx.fillStyle = cellFill(c);
+      if (k >= 1) {
+        ctx.fillRect(x0, y0, w, h);
+        // A fixed-width edge would break the size channel's area scaling.
+        if (CFG.countChannel !== "size") {
+          ctx.strokeStyle = cellEdge(c);
+          ctx.lineWidth = 1;
+          // Half-pixel offset lands a 1px stroke on one pixel row, not two.
+          ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
+        }
+        continue;
+      }
+      // Never below a pixel, or the sparsest cells vanish instead of reading sparse.
+      var iw = Math.max(1, Math.round(w * k)), ih = Math.max(1, Math.round(h * k));
+      ctx.fillRect(x0 + Math.round((w - iw) / 2), y0 + Math.round((h - ih) / 2), iw, ih);
+    }
+  }
+}
+
+// Leaflet numbers tiles past the antimeridian with an out-of-range x, which is
+// right for positioning but not for a request. Web Mercator never wraps y.
+function wrapTileX(x, z) { var n = Math.pow(2, z); return ((x % n) + n) % n; }
+
+var CellLayer = L.GridLayer.extend({
+  options: { tileSize: 256, maxZoom: 20,
+             attribution: 'grid data <a href="https://api.inaturalist.org/v2/docs/">iNaturalist</a>' },
+  initialize: function (options) {
+    L.setOptions(this, options);
+    this._tileData = {};
+    this._aborts = {};
+    this.on("tileunload", function (e) {
+      var k = this.dataKey(e.coords);
+      // Copies of a tile share one entry, so only the last one off the map clears it.
+      if (this.stillShown(k)) return;
+      delete this._tileData[k];
+      // abort tiles left during fast pans
+      var list = this._aborts[k];
+      if (list) { list.forEach(function (c) { c.abort(); }); delete this._aborts[k]; }
+    }, this);
+  },
+  // Leaflet keys _tiles by unwrapped coords but hands createTile wrapped ones;
+  // keying on the wrapped form lets copies of a tile share their data.
+  dataKey: function (coords) {
+    return coords.z + "/" + wrapTileX(coords.x, coords.z) + "/" + coords.y;
+  },
+  stillShown: function (dataKey) {
+    for (var k in this._tiles) {
+      if (this.dataKey(this._tiles[k].coords) === dataKey) return true;
+    }
+    return false;
+  },
+  createTile: function (coords, done) {
+    var size = this.getTileSize().x;
+    var canvas = L.DomUtil.create("canvas", "leaflet-tile cell-tile");
+    canvas.width = size; canvas.height = size;
+    canvas.style.pointerEvents = "none";
+    var self = this;
+    var dataKey = this.dataKey(coords);
+    // Tiles sit in a shared CDN cache for an hour, so a just-corrected ID keeps
+    // showing: the nonce misses the browser cache, ttl=1 drops the CDN TTL to 1s.
+    // Read per tile, so panning after a refresh is cached again.
+    var bust = this.options.bust;
+    var sub = function (u) {
+      if (!u) return null;
+      u = u.replace("{z}", coords.z).replace("{x}", coords.x).replace("{y}", coords.y);
+      return bust ? u + "&ttl=1&_r=" + bust : u;
+    };
+    var ctrl = new AbortController();
+    (this._aborts[dataKey] = this._aborts[dataKey] || []).push(ctrl);
+    function finish() { done(null, canvas); }
+
+    // An empty set draws nothing
+    var urlB = sub(this.options.urlB);
+    Promise.all([fetchGrid(sub(this.options.urlA), ctrl.signal),
+                 urlB ? fetchGrid(urlB, ctrl.signal) : Promise.resolve(null)])
+      .then(function (jsons) {
+        var ja = jsons[0], jb = jsons[1];
+        var g = (ja && ja.grid) || (jb && jb.grid);
+        if (!g) { finish(); return; }
+
+        // The 64-wide UTFGrid halved to iNat's 32x32 data cells.
+        var superRows = Math.floor(g.length / 2);
+        var superCols = Math.floor(g[0].length / 2);
+        var cellW = size / superCols, cellH = size / superRows;
+
+        var cells = new Array(superRows);
+        for (var i = 0; i < superRows; i++) cells[i] = new Array(superCols);
+
+        // The queries are disjoint, so an observation lands on one side only.
+        function accumulate(json, which) {
+          if (!json) return;
+          for (var k in json.data) {
+            var rec = json.data[k];
+            var pt = map.project(L.latLng(rec.latitude, rec.longitude), coords.z);
+            var lx = pt.x - coords.x * size, ly = pt.y - coords.y * size;
+            if (lx < 0 || lx >= size || ly < 0 || ly >= size) continue;
+            var sr = Math.floor(ly / cellH), sc = Math.floor(lx / cellW);
+            var c = cells[sr][sc];
+            if (!c) { c = { a: 0, b: 0 }; cells[sr][sc] = c; }
+            c[which] += rec.cellCount || 0;
+          }
+        }
+        accumulate(ja, "a");
+        accumulate(jb, "b");
+
+        var td = { cells: cells, rows: superRows, cols: superCols,
+                   cellW: cellW, cellH: cellH };
+        paintTile(canvas, td, size);
+
+        // A tile can unload mid-flight, and nothing would free this entry again.
+        if (self.stillShown(dataKey)) self._tileData[dataKey] = td;
+        finish();
+      })
+      // A throw here would leave Leaflet holding the tile in _loading forever.
+      .catch(finish);
+
+    return canvas;
+  },
+  // From the grid data already in memory: every appearance-only setting comes
+  // through here, so it costs no requests.
+  repaint: function () {
+    var size = this.getTileSize().x;
+    for (var k in this._tiles) {
+      var t = this._tiles[k];
+      var td = this._tileData[this.dataKey(t.coords)];
+      if (td) paintTile(t.el, td, size);
+    }
+  },
+  cellAtLatLng: function (latlng) {
+    if (!this._map) return null;          // the cells can be switched off
+    var size = this.getTileSize().x;
+    // The tile zoom, not the map's: under a lock they differ
+    var z = this._tileZoom;
+    var pt = this._map.project(latlng, z);
+    var tx = Math.floor(pt.x / size), ty = Math.floor(pt.y / size);
+    var td = this._tileData[this.dataKey({ z: z, x: tx, y: ty })];
+    if (!td) return null;
+    var col = Math.floor((pt.x - tx * size) / td.cellW);
+    var row = Math.floor((pt.y - ty * size) / td.cellH);
+    var c = td.cells[row] && td.cells[row][col];
+    if (!drawable(c)) return null;
+    // Pixel y grows southward, so unproject(top-left) is the NW corner.
+    var x0 = tx * size + col * td.cellW, y0 = ty * size + row * td.cellH;
+    var nw = this._map.unproject(L.point(x0, y0), z);
+    var se = this._map.unproject(L.point(x0 + td.cellW, y0 + td.cellH), z);
+    // A longitude off the canonical copy of the world is nowhere the API can find.
+    return { a: c.a, b: c.b, swlat: se.lat, swlng: wrapLng(nw.lng),
+             nelat: nw.lat, nelng: wrapLng(se.lng) };
+  }
+});
+
+// ---- map -----------------------------------------------------------------
+var map = L.map("map", { center: [CFG.lat, CFG.lng], zoom: CFG.zoom, zoomControl: false });
+L.control.zoom({ position: "topright" }).addTo(map);
+
+// The cell layer goes to 20, which sets the map's max zoom. Without maxNativeZoom
+// a basemap hides itself at 20 rather than upscaling z19, leaving cells over grey.
+var OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+function osmLayer(muted) {
+  // Same tile URL either way, so switching between the two is served from cache.
+  return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxNativeZoom: 19, maxZoom: 20, attribution: OSM_ATTR,
+    className: muted ? "basemap-muted" : ""
+  });
+}
+var BASEMAPS = {
+  "OSM muted": osmLayer(true),
+  "OSM standard": osmLayer(false),
+  "Esri satellite": L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxNativeZoom: 19, maxZoom: 20,
+      attribution: '&copy; <a href="https://www.esri.com/">Esri</a>, Maxar, Earthstar ' +
+                   'Geographics, and the GIS User Community'
+    })
+};
+// Link keys, so relabeling a basemap in the layer menu leaves shared links working.
+var BASEMAP_KEYS = { osm_muted: "OSM muted", osm: "OSM standard", satellite: "Esri satellite" };
+BASEMAPS[BASEMAP_KEYS[oneOf("basemap", Object.keys(BASEMAP_KEYS), "osm_muted")]].addTo(map);
+map.on("baselayerchange", function () { syncUrl(); });
+
+// ---- taxon overlays ------------------------------------------------------
+// All off by default, drawn under the cells except observations.
+// The confusion set gets only observations.
+var BLANK_TILE = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+var OVERLAY_KINDS = [
+  { key: "taxon_places", label: "checklist places", flag: "listed_places", z: 290 },
+  { key: "taxon_ranges", label: "range",            flag: "ranges",        z: 300 },
+  { key: "geomodel",     label: "geomodel",  flag: "geomodel",      z: 310 },
+  { key: "obs",          label: "observations",     flag: null,            z: 450, pts: true },
+  // Drawn over the observations it is a subset of
+  { key: "flagged", label: "observations not expected nearby", flag: "geomodel", z: 460,
+    pts: true, filter: { expected_nearby: "false" }, color: "#ff00ff" }
+];
+var SIDES = ["a", "set"];
+function kindsFor(side) {
+  return side === "a" ? OVERLAY_KINDS : OVERLAY_KINDS.filter(function (k) { return k.key === "obs"; });
+}
+// Switch from grid to points at z9, same as iNat's Explore page. One layer, and no layer minZoom,
+// which Leaflet would apply as a floor on the whole map.
+var GRID_MAX_ZOOM = 9;
+var ObsTiles = L.TileLayer.extend({
+  getTileUrl: function (coords) {
+    if (!this.options.query) return BLANK_TILE;
+    return "https://api.inaturalist.org/v2/" + (coords.z > GRID_MAX_ZOOM ? "points" : "grid") +
+           "/" + coords.z + "/" + coords.x + "/" + coords.y + ".png?" + this.options.query;
+  }
+});
+// No tile_size: at 512 the server re-indexes the grid, so 256-grid coordinates land
+// on the wrong ground and come back blank.
+function overlayUrl(kind, taxon) {
+  return "https://api.inaturalist.org/v2/" + kind + "/" + taxon + "/{z}/{x}/{y}.png";
+}
+var OVERLAYS = { a: {}, set: {} };
+SIDES.forEach(function (side) {
+  kindsFor(side).forEach(function (k) {
+    var opts = { maxNativeZoom: 19, maxZoom: 20, opacity: 0.75, zIndex: k.z,
+                 errorTileUrl: BLANK_TILE };
+    OVERLAYS[side][k.key] = k.pts ? new ObsTiles("", opts) : L.tileLayer("", opts);
+  });
+});
+function syncOverlayUrls() {
+  SIDES.forEach(function (side) {
+    kindsFor(side).forEach(function (k) {
+      var lyr = OVERLAYS[side][k.key];
+      if (!k.pts) { lyr.setUrl(overlayUrl(k.key, CFG.taxonA)); return; }
+      var p = sideParams(side);
+      if (p && k.filter) Object.keys(k.filter).forEach(function (n) { p.set(n, k.filter[n]); });
+      if (p && k.color) p.set("color", k.color);
+      var query = p ? p.toString() : "";
+      // applyPanel reaches here on repaints too, and redraw() refetches every tile.
+      if (query === lyr.options.query) return;
+      lyr.options.query = query;
+      var id = twinId(side, k);
+      pointGrids[id] = {};          // cached hit data belongs to the previous query
+      Object.keys(pointAborts[id]).forEach(function (n) { pointAborts[id][n].abort(); });
+      pointAborts[id] = {};
+      if (map.hasLayer(lyr)) lyr.redraw();
+    });
+  });
+}
+
+// ---- clickable observation points ----------------------------------------
+// grid/point tiles are raster only, fetch matching UTFGrid tile for obs data
+var POINT_MIN_ZOOM = GRID_MAX_ZOOM + 1;
+var pointGrids = {}, pointAborts = {};       // per layer: "side|kind" then "z/x/y"
+var OBS_FIELDS = "(id:!t,uuid:!t,quality_grade:!t,observed_on:!t,time_observed_at:!t," +
+  "user:(login:!t),taxon:(name:!t,preferred_common_name:!t,rank_level:!t),photos:(url:!t))";
+
+function twinId(side, k) { return side + "|" + k.key; }
+// Sorted so the layer drawn on top answers first for a side.
+function ptsKinds(side) {
+  return kindsFor(side).filter(function (k) { return k.pts; })
+                       .sort(function (a, b) { return b.z - a.z; });
+}
+SIDES.forEach(function (side) {
+  ptsKinds(side).forEach(function (k) {
+    var lyr = OVERLAYS[side][k.key], id = twinId(side, k);
+    pointGrids[id] = {};
+    pointAborts[id] = {};
+    lyr.on("tileloadstart", function (e) {
+      var c = e.coords, key = c.z + "/" + c.x + "/" + c.y;
+      if (pointGrids[id][key] !== undefined) return;   // null means fetched and empty
+      // The layer's own query, so a filtered layer's twin matches its markers.
+      var q = lyr.options.query;
+      if (!q) return;
+      pointGrids[id][key] = null;
+      var ctrl = new AbortController();
+      pointAborts[id][key] = ctrl;
+      fetchGrid("https://api.inaturalist.org/v2/" +
+                (c.z > GRID_MAX_ZOOM ? "points" : "grid") + "/" + c.z + "/" +
+                wrapTileX(c.x, c.z) + "/" + c.y + ".grid.json?" + q, ctrl.signal)
+        .then(function (j) {
+          delete pointAborts[id][key];
+          if (pointGrids[id][key] !== undefined) pointGrids[id][key] = j;
+        });
+    });
+    lyr.on("tileunload", function (e) {
+      var key = e.coords.z + "/" + e.coords.x + "/" + e.coords.y;
+      delete pointGrids[id][key];
+      if (pointAborts[id][key]) { pointAborts[id][key].abort(); delete pointAborts[id][key]; }
+    });
+  });
+});
+
+// UTFGrid 1.2: the row string's character encodes an index into keys, with 34 and
+// 92 skipped so the JSON never needs escaping.
+function utfgridAt(json, px, py) {
+  if (!json) return null;                          // not fetched yet, or failed
+  var res = 256 / json.grid.length;
+  var code = json.grid[Math.floor(py / res)].charCodeAt(Math.floor(px / res));
+  if (code >= 93) code--;
+  if (code >= 35) code--;
+  code -= 32;
+  var key = json.keys[code];
+  return key ? json.data[key] || null : null;      // keys[0] is "" — no feature here
+}
+
+// Same point, expressed on the copy of the world the map is currently showing.
+function nearLng(lng) {
+  return lng + 360 * Math.round((map.getCenter().lng - lng) / 360);
+}
+// The pin stands ~16px above its coordinate, where the UTFGrid cell is, so a
+// cursor over its head is found by probing down that height.
+var PIN_PROBE = [0, 4, 8, 12, 15];
+function pointsAt(latlng) {
+  var hits = [];
+  var size = 256, z = map.getZoom(), pt = map.project(latlng, z);
+  // A grid cell is drawn on its own coordinate, so only pins need the probe.
+  var probe = z >= POINT_MIN_ZOOM ? PIN_PROBE : [0];
+  SIDES.forEach(function (side) {
+    // One hit per side, from the topmost layer that has one: the filtered layer is
+    // a subset of the plain one, so counting both would count the cell twice.
+    ptsKinds(side).some(function (k) {
+      if (!map.hasLayer(OVERLAYS[side][k.key])) return false;
+      var grids = pointGrids[twinId(side, k)];
+      for (var i = 0; i < probe.length; i++) {
+        var y = pt.y + probe[i];
+        // Probing downward can cross a tile boundary, so the tile is re-derived.
+        var tx = Math.floor(pt.x / size), ty = Math.floor(y / size);
+        var d = utfgridAt(grids[z + "/" + tx + "/" + ty], pt.x - tx * size, y - ty * size);
+        if (d && d.uuid) { hits.push(d); return true; }
+      }
+      return false;
+    });
+  });
+  return hits;
+}
+// A marker can stand for several observations. One is shown, the rest counted.
+function hitTotal(hits) {
+  return hits.reduce(function (n, h) { return n + (h.cellCount || 1); }, 0);
+}
+// Cached: hovering re-visits the same pin constantly.
+var obsCache = {};
+function fetchObs(uuid) {
+  if (obsCache[uuid]) return Promise.resolve(obsCache[uuid]);
+  return retryJson("https://api.inaturalist.org/v2/observations/" + encodeURIComponent(uuid) +
+               "?fields=" + encodeURIComponent(OBS_FIELDS))
+    .then(function (j) {
+      var o = j && j.results && j.results[0];
+      if (o) obsCache[uuid] = o;
+      return o;
+    });
+}
+function obsBody(o, others) {
+  return '<div class="pop-body">' +
+    (o ? renderObs(o) : "<div>observation unavailable</div>") +
+    (others > 0 ? '<div style="margin-top:6px;color:#666">and ' + others +
+                  " other observation" + (others > 1 ? "s" : "") + " here</div>" : "") +
+    "</div>";
+}
+// autoClose so the next pin replaces this one
+function obsPopupAt(hits) {
+  var first = hits[0];
+  // a pin stands above its coordinate, an obscured observation is a circle centered on it
+  return L.popup({ maxWidth: 300, closeOnClick: true, autoClose: true,
+                   offset: [0, first.private_location ? -6 : -15] })
+    .setLatLng([first.latitude, nearLng(first.longitude)]);
+}
+function obsPopup(hits) {
+  var first = hits[0], others = hitTotal(hits) - 1;
+  var popup = obsPopupAt(hits).setContent('<div class="pop-body">loading observation&hellip;</div>');
+  setTimeout(function () { popup.openOn(map); }, 0);   // a click opens at once, then fills
+  fetchObs(first.uuid).then(function (o) { popup.setContent(obsBody(o, others)); });
+}
+
+// ---- hover-to-load --------------------------------------------------------
+// A pin with no cell under it loads on hover
+var HOVER_REST_MS = 300;
+var hoverTimer = null, hoverUuid = null;
+function armHoverLoad(hits) {
+  var uuid = hits ? hits[0].uuid : null;
+  if (uuid === hoverUuid) return;             // same pin, nothing to re-arm
+  clearTimeout(hoverTimer);
+  hoverUuid = uuid;
+  if (!uuid) return;
+  hoverTimer = setTimeout(function () {
+    var others = hitTotal(hits) - 1;
+    fetchObs(uuid).then(function (o) {
+      if (hoverUuid !== uuid) return;         // moved on while the request was out
+      obsPopupAt(hits).setContent(obsBody(o, others)).openOn(map);
+    });
+  }, HOVER_REST_MS);
+}
+function renderObs(o) {
+  var photo = o.photos && o.photos[0] && o.photos[0].url;
+  var t = o.taxon, when = o.observed_on || (o.time_observed_at || "").slice(0, 10);
+  return (photo ? '<img alt="" style="width:100%;border-radius:3px;display:block;margin-bottom:5px" src="' +
+                  esc(photo.replace("/square.", "/medium.")) + '">' : "") +
+    (t ? '<div' + (t.rank_level != null && t.rank_level <= 20 ? ' style="font-style:italic"' : "") +
+         ">" + esc(t.name) + "</div>" +
+         (t.preferred_common_name ? '<div style="color:#666">' + esc(t.preferred_common_name) + "</div>" : "")
+       : "<div>Unknown</div>") +
+    '<div style="color:#666;margin-top:3px">' + esc(o.user.login) +
+    (when ? " · " + esc(when) : "") +
+    " · " + esc((o.quality_grade || "").replace("_", " ")) + "</div>" +
+    '<div style="margin-top:5px"><a href="https://www.inaturalist.org/observations/' +
+    encodeURIComponent(o.id) + '" target="_blank" rel="noopener">Open observation &rarr;</a></div>';
+}
+
+// offer only the map layers A actually has
+var HAS_LAYERS = null;
+function fetchMapLayers() {
+  var taxon = CFG.taxonA;
+  HAS_LAYERS = null;
+  retryJson("https://api.inaturalist.org/v2/taxa/" + taxon + "/map_layers")
+    .then(function (j) {
+      if (CFG.taxonA !== taxon) return;
+      HAS_LAYERS = (j && j.results && j.results[0]) || null;
+      rebuildLayersControl();
+    });
+}
+
+var layersControl = null, controlKey = null;
+function overlayGroups() {
+  var groups = [{ name: null, items: [{ label: "outlier cells", key: "outlier cells", layer: layer }] }];
+  SIDES.forEach(function (side) {
+    if (side === "set" && !setIds().length) return;
+    var items = [];
+    kindsFor(side).forEach(function (k) {
+      // Unknown availability errs toward offering the layer.
+      if (side === "a" && k.flag && HAS_LAYERS && !HAS_LAYERS[k.flag]) return;
+      // Keys must be unique across both sides; labelGroups sets the visible text.
+      items.push({ label: k.label, key: side + " · " + k.label, layer: OVERLAYS[side][k.key] });
+    });
+    groups.push({ name: sideName(side), items: items });
+  });
+  return groups;
+}
+function rebuildLayersControl() {
+  if (!layer) return;
+  var groups = overlayGroups(), entries = {}, key = "", kept = [];
+  groups.forEach(function (g) {
+    key += g.name + ":";
+    g.items.forEach(function (it) { entries[it.key] = it.layer; kept.push(it.layer); key += it.label + ","; });
+  });
+  if (key === controlKey) return;
+  controlKey = key;
+  if (layersControl) layersControl.remove();
+  layersControl = L.control.layers(BASEMAPS, entries,
+                                   { position: "topright", autoZIndex: false }).addTo(map);
+  labelGroups(groups);
+  // A layer dropped from the control keeps drawing with no checkbox to stop it.
+  SIDES.forEach(function (side) {
+    kindsFor(side).forEach(function (k) {
+      var lyr = OVERLAYS[side][k.key];
+      if (map.hasLayer(lyr) && kept.indexOf(lyr) === -1) map.removeLayer(lyr);
+    });
+  });
+}
+// L.control.layers has no groups, so rows are relabeled and a side heading
+// inserted above each run. Row order follows the entries object.
+function labelGroups(groups) {
+  var box = layersControl.getContainer().querySelector(".leaflet-control-layers-overlays");
+  var rows = Array.prototype.slice.call(box.children), i = 0;
+  groups.forEach(function (g, gi) {
+    if (g.name) {
+      var head = document.createElement("div");
+      head.className = "lyr-group" + (gi ? " lyr-split" : "");
+      head.textContent = g.name;
+      box.insertBefore(head, rows[i]);
+    }
+    g.items.forEach(function (it) {
+      rows[i].querySelector("input + span").textContent = " " + it.label;
+      if (g.name) rows[i].classList.add("lyr-row");   // indent belongs under a heading
+      i++;
+    });
+  });
+}
+
+function lockedZoom() { return CFG.gridZoom == null ? undefined : CFG.gridZoom; }
+var layer = null;
+// Whether the cells are checked on. Leaflet fires overlayremove for a programmatic
+// removal too, so applyPanel restores this around a rebuild.
+var cellsShown = true;
+map.on("overlayadd overlayremove", function (e) {
+  if (e.layer === layer) cellsShown = e.type === "overlayadd";
+});
+
+// One record per taxon id
+var TAXON_FIELDS = "(id:!t,name:!t,rank:!t,rank_level:!t,preferred_common_name:!t," +
+  "observations_count:!t,taxon_changes_count:!t,default_photo:(id:!t,square_url:!t,medium_url:!t," +
+  "attribution:!t,attribution_name:!t,license_code:!t))";
+var TAXA = {};
+// Confusion counts from the last seed, keyed by taxon id
+var SEED_COUNTS = {};
+// Every row the seed saw, so a hand-added taxon can net out the ones inside it.
+var SEED_RAW = [];
+
+function shortName(t) { return (t && t.name) || ("Taxon " + (t && t.id)); }
+function longName(t) {
+  if (!t || !t.name) return shortName(t);
+  return t.preferred_common_name ? t.name + " (" + t.preferred_common_name + ")" : t.name;
+}
+function nameOf(id) { return shortName(TAXA[id] || { id: id }); }
+function sideName(side) {
+  return side === "a" ? nameOf(CFG.taxonA)
+                      : "confusion set (" + setIds().length + ")";
+}
+function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""; }
+function rankPrefix(t) { return t && t.rank && t.rank_level > 10 ? cap(t.rank) + " " : ""; }
+var seeding = false;
+function setSeeding(on) { seeding = on; setStatus(); renderChips(); }
+function setStatus() {
+  var el = document.getElementById("status");
+  var msg = seeding ? "seeding confusion set&hellip;"
+          : gaveUp ? gaveUp + " tile(s) gave up &mdash; those cells are blank, not empty. " +
+                     "Press &#8635; refresh tiles."
+          : throttled ? throttled + " request(s) throttled" : "";
+  el.innerHTML = msg;
+  el.hidden = !msg;
+}
+
+function showNames() {
+  document.getElementById("lbl_a").textContent =
+    "all " + chipName(TAXA[CFG.taxonA] || { id: CFG.taxonA });
+  renderChips();
+  syncSeedOptions();
+  renderSeedSrcSeg();              // withdrawn IDs are offered per audited rank
+  syncSeedSrc();
+  rebuildLayersControl();          // overlay labels carry the names
+  if (elA.dataset.id === CFG.taxonA) setBox(TAXA[CFG.taxonA]);
+}
+
+// show how many taxa in each option
+function syncSeedOptions() {
+  var sel = document.getElementById("in_seed");
+  var rows = seedTaxon === CFG.taxonA && SEED_ROWS.length ? SEED_ROWS : null;
+  Array.prototype.forEach.call(sel.options, function (o) {
+    if (!o.dataset.label) o.dataset.label = o.textContent;
+    o.textContent = rows ? o.dataset.label + " (" + sliceSeed(rows, o.value).length + ")"
+                         : o.dataset.label;
+  });
+}
+
+// One batched call for every taxon with no record, or a seed's lean one
+function refreshTaxa() {
+  var need = [CFG.taxonA].concat(setIds()).filter(function (id) {
+    var t = TAXA[id];
+    return !t || !t.name || t.observations_count == null;
+  });
+  showNames();
+  if (!need.length) return Promise.resolve();
+  return retryJson("https://api.inaturalist.org/v2/taxa?id=" + need.join(",") +
+        "&per_page=500&fields=" + encodeURIComponent(TAXON_FIELDS))
+    .then(function (j) {
+      if (!j || !j.results) return;
+      j.results.forEach(function (t) { TAXA[t.id] = t; });
+      showNames();
+    });
+}
+
+// ---- the confusion set ---------------------------------------------------
+// The last seed's priced rows, before the threshold slices them
+var SEED_ROWS = [];
+var seedFor = null;                 // the whole query SEED_ROWS came from, for caching
+var seedTaxon = null;               // just its audited taxon
+var seedBox = null;                 // the viewport it was scoped to, if any
+var SEED_FIELDS = "(id:!t,name:!t,rank:!t,rank_level:!t,parent_id:!t,descendant_obs_count:!t)";
+
+// Set taxa can nest, so a count belongs to the deepest one holding it. Returns,
+// per taxon, the subtree already claimed by the set taxa inside it.
+function nestedCounts(nodes, inSet) {
+  var parent = {}, nested = {};
+  nodes.forEach(function (n) { parent[n.id] = n.parent_id; });
+  nodes.forEach(function (n) {
+    if (!inSet[n.id]) return;
+    for (var c = parent[n.id]; c != null; c = parent[c])
+      if (inSet[c]) { nested[c] = (nested[c] || 0) + n.descendant_obs_count; break; }
+  });
+  return nested;
+}
+
+// descendant, not direct: an observation identified below a taxon is still that
+// taxon's. Two exclusions, both "not a rival identification": anything under the
+// audited taxon *is* it, and anything above it is it awaiting consensus.
+function seedRowsFrom(nodes, taxonId) {
+  var parent = {}, level = {};
+  nodes.forEach(function (n) { parent[n.id] = n.parent_id; level[n.id] = n.rank_level; });
+  function underAudited(id) {
+    for (var cur = id; cur != null; cur = parent[cur])
+      if (String(cur) === taxonId) return true;
+    return false;
+  }
+  var ancestor = {};
+  for (var a = parent[taxonId]; a != null; a = parent[a]) ancestor[a] = true;
+  // The range between A's rank and species, so a genus audit sees genera too.
+  var rl = level[taxonId] || 10;
+  var lo = Math.min(rl, 10), hi = Math.max(rl, 10);
+  var kept = nodes.filter(function (n) {
+    return n.rank_level >= lo && n.rank_level <= hi && n.descendant_obs_count > 0 &&
+           !ancestor[n.id] && !underAudited(n.id);
+  });
+  var isKept = {};
+  kept.forEach(function (n) { isKept[n.id] = true; });
+  var nested = nestedCounts(nodes, isKept);
+  return kept
+    .map(function (n) { return { count: n.descendant_obs_count - (nested[n.id] || 0), taxon: n }; })
+    .filter(function (r) { return r.count > 0; })
+    .sort(function (a, b) { return b.count - a.count; });
+}
+
+// An antimeridian view wraps to swlng > nelng
+function wrapLng(x) {
+  if (x >= -180 && x <= 180) return x;
+  var v = (x + 180) % 360;
+  return (v < 0 ? v + 360 : v) - 180;
+}
+function putBox(p, box) {
+  if (box) ["swlat", "swlng", "nelat", "nelng"].forEach(function (k) { p.set(k, box[k]); });
+  return p;
+}
+// bounds is the viewport re-seed's, and optional.
+function boxOf(bounds) {
+  // whole world; the bbox would say nothing
+  if (!bounds || bounds.getEast() - bounds.getWest() >= 360) return null;
+  return { swlat: Math.max(-85, bounds.getSouth()), swlng: wrapLng(bounds.getWest()),
+           nelat: Math.min(85, bounds.getNorth()), nelng: wrapLng(bounds.getEast()) };
+}
+
+// Membership is gated on the confusion ratio ε, which is confusions / the taxon's own observations,
+// not raw count: any abundant taxon collects a handful of stray IDs and would swamp
+// the denominator. The count floor catches the mirror case, where that handful
+// gives a rare taxon a large ε. Order stays raw count, which thresholds slice.
+// Thresholds were fitted using 126 taxa, and validated against 64 hold-back taxa.
+var EPS_FLOOR = 1 / 20;                        // must be at least 1/20th as confusable as top taxon
+var EPS_PRICED = 30;
+var MIN_CONF = 3, MIN_CONF_SHARE = 0.01;
+var CEILING_MIN_OWN = 1000;                    // don't let uncommon taxa set high ε
+var ABUNDANT = 200000, ABUNDANT_EPS = 0.0003;  // a big taxon needs an absolute ε
+
+function priceSeed(rows, p) {
+  var head = rows.slice(0, EPS_PRICED);
+  // No row clears the count floor: an answer, not a failure.
+  if (!head.length || head[0].count < MIN_CONF) return Promise.resolve([]);
+  var q = new URLSearchParams(p);
+  q.delete("ident_taxon_id");
+  q.set("taxon_id", head.map(function (r) { return r.taxon.id; }).join(","));
+  return retryJson("https://api.inaturalist.org/v2/observations/taxonomy?" + q.toString())
+    .then(function (j) {
+      // Without ε there is no defensible way to choose taxa, so fail the seed
+      // rather than fall back to raw count.
+      if (!j || !j.results) throw new Error("unpriced");
+      // Every node, not just species. One with no own-count prices at ε 0 and is dropped.
+      var own = {}, inSet = {};
+      j.results.forEach(function (n) { own[n.id] = n.descendant_obs_count; });
+      head.forEach(function (r) { inSet[r.taxon.id] = true; });
+      // r.count already excludes the taxa nested inside this one, so its own count
+      // must too, or a container is priced over a subtree it was not credited with.
+      var ownNested = nestedCounts(j.results, inSet);
+      head.forEach(function (r) {
+        own[r.taxon.id] = (own[r.taxon.id] || 0) - (ownNested[r.taxon.id] || 0);
+      });
+      var eps = head.map(function (r) {
+        return own[r.taxon.id] > 0 ? r.count / own[r.taxon.id] : 0;
+      });
+      // The ceiling comes from one row, so a wrong one raises the bar for the whole
+      // set: it must clear the count floor and have observations enough to price ε.
+      var floor = Math.max(MIN_CONF, MIN_CONF_SHARE * head[0].count);
+      var top = 0, topAny = 0;
+      eps.forEach(function (e, i) {
+        if (head[i].count < floor) return;
+        if (e > topAny) topAny = e;
+        if (own[head[i].taxon.id] >= CEILING_MIN_OWN && e > top) top = e;
+      });
+      if (!top) top = topAny;
+      // A zero ceiling means the own-counts never arrived.
+      if (!top) throw new Error("unpriced");
+      var kept = head.filter(function (r, i) {
+        return eps[i] >= top * EPS_FLOOR && r.count >= floor &&
+               (own[r.taxon.id] < ABUNDANT || eps[i] >= ABUNDANT_EPS);
+      });
+      // The abundance rule can evict the row that set the ceiling.
+      return kept.length ? kept
+                         : head.filter(function (r, i) { return eps[i] === top; }).slice(0, 1);
+    });
+}
+
+// Call for current and withdrawn IDs. Obs can be represented multiple times (if they
+// have multiple IDs). v1 only, and it takes no bbox, so a viewport seed cannot ask it.
+// Offered for species audits only because ssp are rolled up and coarse taxa are dropped
+// if they're not leaves.
+function countsRows(taxonId) {
+  var p = new URLSearchParams({ taxon_id: taxonId, current: "any",
+                                quality_grade: "needs_id,research", per_page: "500" });
+  return retryJson("https://api.inaturalist.org/v1/identifications/species_counts?" + p)
+    .then(function (j) {
+      if (!j || !j.results) throw new Error("no results");
+      return j.results
+        .filter(function (e) {
+          return e.taxon.rank_level === 10 && String(e.taxon.id) !== taxonId;
+        })
+        .map(function (e) { return { count: e.count, taxon: e.taxon }; })
+        .sort(function (a, b) { return b.count - a.count; });
+    });
+}
+
+function withdrawnOk() {
+  var t = TAXA[CFG.taxonA];
+  return !t || t.rank_level == null || t.rank_level === 10;
+}
+function seedSrcNow() { return withdrawnOk() && CFG.withdrawn ? "both" : "current"; }
+
+function fetchSeed(taxonId, bounds) {
+  // Keyed on the whole query, so a re-seed at a new scope refetches while a
+  // threshold change re-slices what is already in hand.
+  var box = boxOf(bounds), p = putBox(seedFilters(), box);
+  var wantBoth = seedSrcNow() === "both";
+  var key = String(taxonId) + "|" + (wantBoth ? "any|" : "") + p.toString();
+  if (seedFor === key) return Promise.resolve(SEED_ROWS);
+  setSeeding(true);
+  p.set("ident_taxon_id", taxonId);
+  p.set("fields", SEED_FIELDS);
+  var pending = wantBoth ? countsRows(taxonId)
+    : retryJson("https://api.inaturalist.org/v2/observations/taxonomy?" + p.toString())
+        .then(function (j) {
+          if (!j || !j.results) throw new Error("no results");
+          return seedRowsFrom(j.results, taxonId);
+        });
+  var raw = [];
+  return pending.then(function (r) { raw = r; return priceSeed(r, p); })
+    .then(function (rows) {
+      if (taxonId !== CFG.taxonA) return null;
+      // Every row the seed saw, so a hand-added taxon reads like the rest.
+      SEED_COUNTS = {};
+      raw.forEach(function (r) { SEED_COUNTS[r.taxon.id] = r.count; });
+      SEED_RAW = raw;
+      // name and rank only, which refreshTaxa then adds to
+      rows.forEach(function (r) { TAXA[r.taxon.id] = TAXA[r.taxon.id] || r.taxon; });
+      SEED_ROWS = rows;
+      seedFor = key;
+      // Kept so the chip links ask over the same ground the counts were taken on.
+      seedBox = box;
+      seedTaxon = taxonId;
+      return rows;
+    })
+    // null, not [], so a failed request stays distinguishable from a taxon with
+    // no confusions. seedFor is left unset, so the next call retries.
+    .catch(function () { return null; })
+    .then(function (rows) { setSeeding(false); return rows; });
+}
+// A seeded row's count excludes the rows nested inside it, so a chip must exclude the
+// same ones, plus A. Rank stands in for ancestry: only a finer taxon can nest inside.
+function seedExclusions(id) {
+  var lvl = (TAXA[id] || {}).rank_level, out = [CFG.taxonA];
+  // A failed seed leaves SEED_RAW holding the previous taxon's rows.
+  if (lvl != null && seedTaxon === CFG.taxonA)
+    SEED_RAW.forEach(function (r) {
+      if (r.taxon.rank_level < lvl) out.push(String(r.taxon.id));
+    });
+  return out.join(",");
+}
+
+// fill a hand-added taxon
+function fillSeedCount(id) {
+  if (SEED_COUNTS[id] != null) return;
+  var both = seedSrcNow() === "both";
+  var p = both ? withdrawnParams(id) : chipParams(id, "taxon_id");
+  p.set("per_page", "0");
+  if (!both) p.set("fields", "id");
+  var taxon = CFG.taxonA;
+  retryJson("https://api.inaturalist.org/" + (both ? "v1/identifications?" : "v2/observations?") + p)
+    .then(function (j) {
+      if (!j || taxon !== CFG.taxonA) return;
+      SEED_COUNTS[id] = j.total_results;
+      renderChips();
+    });
+}
+// Cumulative thresholds follow the shape of the distribution, which varies by
+// taxon; top-N is a flat cut
+function sliceSeed(rows, seed) {
+  var s = (seed || CFG.seed).split(":"), v = parseFloat(s[1]);
+  if (s[0] === "top") return rows.slice(0, v).map(function (r) { return String(r.taxon.id); });
+  var total = rows.reduce(function (n, r) { return n + r.count; }, 0);
+  var out = [], cum = 0;
+  for (var i = 0; i < rows.length; i++) {
+    out.push(String(rows[i].taxon.id));
+    cum += rows[i].count;
+    if (cum / total >= v) break;
+  }
+  return out;
+}
+// don't include the input panel when calculating viewport
+function panelPad() {
+  return document.getElementById("panel").getBoundingClientRect().right -
+         map.getContainer().getBoundingClientRect().left + 6;
+}
+function visibleBounds() {
+  var size = map.getSize();
+  return L.latLngBounds(map.containerPointToLatLng([panelPad(), size.y]),
+                        map.containerPointToLatLng([size.x, 0]));
+}
+
+// withdrawnOk reads rank
+function ranked() {
+  var t = TAXA[CFG.taxonA];
+  if (!CFG.withdrawn || (t && t.rank_level != null)) return Promise.resolve();
+  setSeeding(true);
+  return refreshTaxa();
+}
+// runDiag needs A's rank
+function reseed(bounds) {
+  return ranked().then(function () { return fetchSeed(CFG.taxonA, bounds); })
+    .then(function (rows) {
+      if (rows) CFG.setIds = sliceSeed(rows);
+      var named = refreshTaxa();
+      applyPanel();
+      return named;
+    }).then(runDiag);
+}
+
+// ---- taxon diagnostic ----------------------------------------------------
+// do confusions resolve or move to coarser ranks?
+// are there a lot of non-organism obs?
+
+var DIAG_FILTERS = "verifiable=true&mappable=true&spam=false";
+var DIAG_PARTNERS = 3;
+var DIAG_COARSE_SHARE = 0.5;      // set a cutoff for "many move coarse"
+var DIAG_MIN_ANNOTATED = 30;      // set a cutoff for annotated obs
+var DIAG_SIGN_SHARE = 0.25;       // set a cutoff for sign annotated obs
+var diagFor = null;
+var HOMOGENEOUS = [29, 32];       // galls, leafmines
+
+function diagPartner(taxonA, memberId, lim) {
+  return retryJson("https://api.inaturalist.org/v2/observations/taxonomy?" +
+        DIAG_FILTERS + "&ident_taxon_id_exclusive=" +
+        encodeURIComponent(taxonA + "," + memberId) + "&fields=" +
+        encodeURIComponent("(rank_level:!t,direct_obs_count:!t)"))
+    .then(function (j) {
+      if (!j || !j.results) return null;
+      var total = 0, coarse = 0;
+      j.results.forEach(function (r) {
+        total += r.direct_obs_count || 0;
+        if (r.rank_level > lim) coarse += r.direct_obs_count || 0;
+      });
+      return { contested: total, coarse: coarse };
+    });
+}
+// Scoped to the audited taxon
+function diagSign(taxonA) {
+  return retryJson("https://api.inaturalist.org/v2/observations/popular_field_values?" +
+        DIAG_FILTERS + "&taxon_id=" + taxonA + "&no_histograms=true&fields=" +
+        encodeURIComponent("(count:!t,controlled_attribute:(id:!t),controlled_value:(id:!t))"))
+    .then(function (j) {
+      var annotated = 0, sign = 0, top = 0, topId = null;
+      ((j && j.results) || []).forEach(function (r) {
+        if ((r.controlled_attribute || {}).id !== 22) return;
+        annotated += r.count || 0;
+        if ((r.controlled_value || {}).id === 24) return;
+        sign += r.count || 0;
+        if (r.count > top) { top = r.count; topId = (r.controlled_value || {}).id; }
+      });
+      return { annotated: annotated, sign: sign,
+               mixed: HOMOGENEOUS.indexOf(topId) === -1 };
+    });
+}
+function fetchDiag(taxonA, members, auditLevel) {
+  var lim = auditLevel || 10;
+  return Promise.all(members.map(function (m) { return diagPartner(taxonA, m.id, lim); })
+                            .concat([diagSign(taxonA)]))
+    .then(function (res) {
+      var sign = res.pop(), parts = [], contested = 0, coarse = 0;
+      res.forEach(function (r, i) {
+        if (!r || !r.contested) return;
+        parts.push({ taxon: members[i], contested: r.contested,
+                     reached: (r.contested - r.coarse) / r.contested });
+        contested += r.contested;
+        coarse += r.coarse;
+      });
+      if (!parts.length) return null;
+      return { contested: contested, coarse: coarse, reached: (contested - coarse) / contested,
+               parts: parts, annotated: sign.annotated, sign: sign.sign, mixed: sign.mixed };
+    });
+}
+function diagIdentifyUrl(taxonId) {
+  return identifyUrl(new URLSearchParams({ mappable: "true", lrank: "complex",
+                                           ident_taxon_id: taxonId }));
+}
+var diagOpen = false;
+document.getElementById("diag").addEventListener("click", function (e) {
+  if (!e.target.closest || !e.target.closest(".d-sum")) return;
+  diagOpen = !diagOpen;
+  this.classList.toggle("open", diagOpen);
+});
+var signy = false;
+function setSigny(on) {
+  signy = on;
+  if (!on && signExcluded()) { setSignExcluded(false); applyPanel(); }
+  syncSignBox();
+}
+function syncSignBox() {
+  document.getElementById("in_nosign").checked = signExcluded();
+  document.getElementById("lbl_nosign").hidden = !signy;
+}
+document.getElementById("in_nosign").addEventListener("change", function () {
+  setSignExcluded(this.checked);
+  syncSignBox();
+  applyPanel();
+});
+// A taxon change leaves no mark on the ID it withdrew, but its replacement carries one.
+var WD_SAMPLE = 20, WD_MIN_HITS = 3;
+var IDENT_URL = "https://api.inaturalist.org/v1/identifications";
+var IDENT_QG = "needs_id,research";
+
+function splitPartners(taxonId) {
+  var t = TAXA[taxonId] || {};
+  if (seedSrcNow() !== "both" || !t.taxon_changes_count) return Promise.resolve([]);
+  var p = new URLSearchParams({ taxon_id: taxonId, current: "false", order_by: "id",
+      order: "asc", per_page: WD_SAMPLE, quality_grade: IDENT_QG });
+  return retryJson(IDENT_URL + "?" + p).then(function (j) {
+    var rows = (j && j.results) || [], pairs = {}, obs = {};
+    rows.forEach(function (r) {
+      pairs[r.observation.id + "/" + r.user.id] = 1;
+      obs[r.observation.id] = 1;
+    });
+    if (!rows.length) return [];
+    var q = new URLSearchParams({ observation_id: Object.keys(obs).join(","), is_change: "true",
+        current: "any", per_page: "200", quality_grade: IDENT_QG });
+    return retryJson(IDENT_URL + "?" + q).then(function (k) {
+      var hits = {};
+      ((k && k.results) || []).forEach(function (r) {
+        if (!r.taxon_change || String(r.taxon.id) === String(taxonId)) return;
+        if (!pairs[r.observation.id + "/" + r.user.id]) return;
+        hits[r.taxon.id] = (hits[r.taxon.id] || 0) + 1;
+      });
+      return Object.keys(hits).filter(function (id) { return hits[id] >= WD_MIN_HITS; })
+        .sort(function (a, b) { return hits[b] - hits[a]; });
+    });
+  });
+}
+// The identifications endpoint returns a lean taxon, so names come from the seed.
+function partnerName(id) {
+  var t = TAXA[id];
+  SEED_RAW.forEach(function (r) { if (!t && String(r.taxon.id) === id) t = r.taxon; });
+  return chipName(t || { id: id });
+}
+function splitNote(ids) {
+  return ids.map(function (id) { return esc(partnerName(id)); }).join(" and ") +
+    " split from this taxon and the confusion count includes identifications auto-withdrawn " +
+    "by the split. Seed from current IDs, or add partners by hand.";
+}
+
+function renderDiag(d, rank, partners) {
+  var el = document.getElementById("diag");
+  var why = partners && partners.length ? [splitNote(partners)] : [];
+  if (!d) {
+    el.className = "diag" + (why.length ? " warn" : "");
+    el.innerHTML = why.length ? '<div class="d-why">' + why[0] + "</div>" : "";
+    setSigny(false);
+    return;
+  }
+  var note = [], n = d.parts.length;
+  var self = esc(chipName(TAXA[CFG.taxonA] || { id: CFG.taxonA }));
+  if (1 - d.reached >= DIAG_COARSE_SHARE)
+    why.push("Identify coarse observations carrying an ID of " + self + ' <a href="' +
+             diagIdentifyUrl(CFG.taxonA) + '" target="_blank" rel="noopener">here</a>');
+  var signHeavy = d.mixed && d.annotated >= DIAG_MIN_ANNOTATED &&
+                  d.sign / d.annotated >= DIAG_SIGN_SHARE;
+  setSigny(signHeavy);
+  if (signHeavy)
+    note.push(Math.round(100 * d.sign / d.annotated) + "% of annotated observations are sign.");
+  var seg = [
+    d.contested.toLocaleString() + " observations carry IDs of " +
+      (n === 1 ? "both " + self + " and " + esc(chipName(d.parts[0].taxon))
+               : self + " and one of its top " + n + " confusions (" +
+                 d.parts.map(function (p) { return esc(chipName(p.taxon)); }).join(", ") + ")"),
+    '<span class="d-key">' + d.coarse.toLocaleString() + " stopped above " + esc(rank) +
+      " agreement</span>"
+  ];
+  if (n > 1) {
+    var by = d.parts.slice().sort(function (a, b) { return b.reached - a.reached; });
+    var pct = function (p) { return Math.round(p.reached * 100) + "% (" + esc(chipName(p.taxon)) + ")"; };
+    seg.push("range: " + pct(by[0]) + " to " + pct(by[n - 1]) + " reaching " + esc(rank) + " agreement");
+  }
+  el.className = "diag" + (why.length ? " warn" : "") + (diagOpen ? " open" : "");
+  el.innerHTML =
+    '<button type="button" class="d-sum"><span><strong>' +
+    (d.contested - d.coarse).toLocaleString() + "</strong> of " + d.contested.toLocaleString() +
+    " reached " + esc(rank) + '</span><span class="d-caret">&#9656;</span></button>' +
+    '<div class="d-body"><div>' + seg.join(" · ") + "</div>" +
+    why.concat(note).map(function (w) { return '<div class="d-why">' + w + "</div>"; }).join("") +
+    "</div>";
+}
+function runDiag() {
+  var el = document.getElementById("diag");
+  // A failed seed leaves SEED_ROWS holding the *previous* taxon's confusions.
+  var rows = seedTaxon === CFG.taxonA ? SEED_ROWS.slice(0, DIAG_PARTNERS) : [];
+  var members = rows.map(function (r) { return r.taxon; });
+  if (!members.length) { diagFor = null; renderDiag(null); return; }
+  // The seed source is in the key: only withdrawn IDs carry the split warning.
+  var key = CFG.taxonA + "/" + seedSrcNow() + "/" +
+            members.map(function (t) { return t.id; }).join(",");
+  if (diagFor === key) return;
+  diagFor = key;
+  el.className = "diag";
+  el.textContent = "checking what this taxon's confusions look like…";
+  var self = TAXA[CFG.taxonA] || {};
+  Promise.all([fetchDiag(CFG.taxonA, members, self.rank_level), splitPartners(CFG.taxonA)])
+    .then(function (r) {
+      // taxon moved on while in flight
+      if (diagFor === key) renderDiag(r[0], self.rank || "species", r[1]);
+    });
+}
+
+function chipName(t) {
+  if (!t || !t.name) return shortName(t);
+  var parts = t.name.split(" ");
+  if (parts.length < 2 || (t.rank_level != null && t.rank_level > 20)) return t.name;
+  return parts[0].charAt(0) + ". " + parts.slice(1).join(" ");
+}
+
+function withdrawnParams(id) {
+  return new URLSearchParams({ taxon_id: CFG.taxonA, observation_taxon_id: id, current: "any",
+                               quality_grade: "needs_id,research",
+                               without_observation_taxon_id: seedExclusions(id) });
+}
+function chipParams(id, key) {
+  var p = putBox(seedFilters(), seedBox);
+  p.set(key, id);
+  p.set("ident_taxon_id", CFG.taxonA);
+  p.set("without_taxon_id", seedExclusions(id));
+  return p;
+}
+// Withdrawn IDs have no page on iNat, so this goes to pisum's viewer.
+function seedIdentificationsUrl(id) {
+  return "https://jumear.github.io/stirfry/iNatAPIv1_identifications?" + withdrawnParams(id);
+}
+
+function renderChips() {
+  var box = document.getElementById("chips"), ids = setIds();
+  box.innerHTML = "";
+  if (!ids.length) {
+    var msg = document.createElement("span");
+    msg.className = seeding ? "empty wait" : "empty";
+    var seeded = !seeding && seedTaxon === CFG.taxonA && !SEED_ROWS.length;
+    msg.textContent =
+      seeding ? "seeding…"
+      : !seeded ? "No taxa to compare against — add one, or re-seed."
+      : seedBox ? "Nothing in this view is confused with " + nameOf(CFG.taxonA) +
+                  ". Try “re-seed” to search globally."
+      : "Nothing is confused with " + nameOf(CFG.taxonA) + " often enough to compare against.";
+    box.appendChild(msg);
+    return;
+  }
+  ids.forEach(function (id) {
+    var t = TAXA[id] || { id: id }, chip = document.createElement("span");
+    chip.className = "chip";
+    var src = t.default_photo && t.default_photo.square_url;
+    if (src) {
+      var img = document.createElement("img");
+      img.src = src; img.alt = "";
+      attachCard(img, function () { return TAXA[id]; });
+      chip.appendChild(img);
+    }
+    var nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = chipName(t);
+    nm.title = longName(t);
+    chip.appendChild(nm);
+    if (SEED_COUNTS[id] != null) {
+      var withdrawn = seedSrcNow() === "both";
+      var n = document.createElement("a");
+      n.className = "n";
+      n.textContent = Number(SEED_COUNTS[id]).toLocaleString();
+      n.title = Number(SEED_COUNTS[id]).toLocaleString() +
+                (withdrawn
+                   ? " identifications of " + nameOf(CFG.taxonA) +
+                     ", current and withdrawn, on observations now at this taxon"
+                   : " observations now at this taxon carrying an identification of " +
+                     nameOf(CFG.taxonA)) +
+                (seedExclusions(id).indexOf(",") === -1 ? ""
+                   : ", excluding the taxa the seed counts on their own") +
+                (withdrawn ? " — open in pisum's identifications viewer"
+                           : " — open in Identify");
+      n.href = withdrawn ? seedIdentificationsUrl(id) : identifyUrl(chipParams(id, "taxon_ids"));
+      n.target = "_blank";
+      n.rel = "noopener";
+      chip.appendChild(n);
+    }
+    var x = document.createElement("button");
+    x.type = "button"; x.innerHTML = "&times;";
+    x.title = "Remove from the set";
+    x.setAttribute("aria-label", "Remove " + shortName(t));
+    x.addEventListener("click", function () {
+      CFG.setIds = setIds().filter(function (o) { return o !== id; });
+      applyPanel();
+    });
+    chip.appendChild(x);
+    box.appendChild(chip);
+  });
+}
+
+// ---- hover / click -------------------------------------------------------
+// in priority order: observation pin, then drawn box, then cell underneath
+var tip = null;
+var ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, function (ch) { return ESC[ch]; });
+}
+function counts(info) {
+  var total = info.a + info.b;
+  function row(name, n) {
+    var p = total ? n / total * 100 : 0;
+    return "<div><strong>" + esc(name) + ":</strong> " + n +
+           " (" + p.toFixed(1) + "%)</div>";
+  }
+  return row(nameOf(CFG.taxonA), info.a) + row(sideName("set"), info.b) +
+         "<div><strong>Total:</strong> " + total + "</div>";
+}
+
+function breakdownBody(info) {
+  if (!info.members.length) return "";
+  var out = '<div class="bd">';
+  info.members.forEach(function (m) {
+    var pre = rankPrefix(m);
+    var label = (pre ? '<span class="rk">' + esc(pre.trim()) + "</span> " : "") + esc(m.name);
+    var title = longName(TAXA[m.id] || m) +
+      (m.remainder ? " — excluding the taxa listed separately" : "");
+    out += '<div class="bd-row"><span class="nm" title="' + esc(title) + '">' + label +
+           '</span><span class="n">' + m.count.toLocaleString() +
+           '</span><span class="pc">' +
+           (info.b ? (m.count / info.b * 100).toFixed(0) : "0") + "%</span></div>";
+  });
+  if (info.absent.length)
+    out += '<div class="bd-note">absent here: ' +
+           esc(info.absent.map(function (id) { return chipName(TAXA[id] || { id: id }); }).join(", ")) +
+           "</div>";
+  return out + "</div>";
+}
+map.on("mousemove", function (e) {
+  if (drawArmed || drawing) return;
+  var hits = pointsAt(e.latlng);
+  var clickable = hits.length && map.getZoom() >= POINT_MIN_ZOOM;
+  map.getContainer().style.cursor = clickable ? "pointer" : "";
+  var info = layer && layer.cellAtLatLng(e.latlng);
+  // A pin alone loads on hover; over a cell the tooltip keeps the counts.
+  armHoverLoad(hits.length && !info ? hits : null);
+  if (!info) { if (tip) { map.removeLayer(tip); tip = null; } return; }
+  if (!tip) tip = L.tooltip({ sticky: true, opacity: 0.95, direction: "top", className: "cell-tip" });
+  var n = hitTotal(hits);
+  tip.setLatLng(e.latlng).setContent(
+    counts(info) +
+    (clickable ? '<div style="color:#555">click for ' +
+                 (n > 1 ? n + " observations here" : "this observation") + "</div>" : "")
+  ).addTo(map);
+});
+function identifyUrl(p) {
+  p.set("reviewed", "any");
+  p.set("per_page", "100");
+  if (!p.has("quality_grade") && p.get("verifiable") === "true") {
+    p.delete("verifiable");
+    p.set("quality_grade", "needs_id,research");
+  }
+  if (!FILTERS.spam) p.delete("spam");
+  return "https://www.inaturalist.org/observations/identify?" + p;
+}
+function sideIdentifyUrl(side, box) {
+  var p = putBox(sideParams(side), box);
+  if (side === "set") { p.set("taxon_ids", p.get("taxon_id")); p.delete("taxon_id"); }
+  return identifyUrl(p);
+}
+function links(box) {
+  var out = '<div style="margin-top:8px">' +
+    '<a href="' + sideIdentifyUrl("a", box) + '" target="_blank" rel="noopener">Identify ' +
+    esc(nameOf(CFG.taxonA)) + " here &rarr;</a>";
+  if (setIds().length)
+    out += '<br><a href="' + sideIdentifyUrl("set", box) + '" target="_blank" rel="noopener">' +
+           "Identify the set here &rarr;</a>";
+  return out + "</div>";
+}
+var dblHold = null;
+function holdDblClick() {
+  clearTimeout(dblHold);
+  map.doubleClickZoom.disable();
+  dblHold = setTimeout(function () { map.doubleClickZoom.enable(); }, 500);
+}
+map.on("click", function (e) {
+  if (drawArmed || justDrew) return;
+  var hits = map.getZoom() >= POINT_MIN_ZOOM ? pointsAt(e.latlng) : [];
+  if (hits.length) {
+    if (tip) { map.removeLayer(tip); tip = null; }
+    obsPopup(hits);
+    holdDblClick();
+    return;
+  }
+  if (boxRect && boxRect.getBounds().contains(e.latlng)) {
+    showBoxSummary();
+    holdDblClick();
+    return;
+  }
+  var info = layer && layer.cellAtLatLng(e.latlng);
+  if (!info) return;
+  if (tip) { map.removeLayer(tip); tip = null; }
+  summaryPopup(info, e.latlng, counts(info));
+  holdDblClick();
+});
+
+// ---- keeping one popup out of many ---------------------------------------
+// "close others" button on popups
+var OTHERS_ICON =
+  '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.3" stroke-linecap="round" aria-hidden="true">' +
+  '<path d="M5.2 2.6 H12.2 A1.2 1.2 0 0 1 13.4 3.8 V10.8"/>' +
+  '<rect x="2.6" y="5.2" width="8.2" height="8.2" rx="1.2"/>' +
+  '<path d="M4.9 7.5 L8.5 11.1 M8.5 7.5 L4.9 11.1"/></svg>';
+var openPopups = [];
+var cellPopups = {};              // keyed from creation, before the open timer fires
+
+function closeAllPopups() {
+  cellPopups = {};
+  openPopups.slice().forEach(function (p) { map.closePopup(p); });
+}
+function closeOthers(keep) {
+  openPopups.slice().forEach(function (p) { if (p !== keep) map.closePopup(p); });
+  map._popup = keep;
+}
+// Hidden at one popup: there are no others to close.
+function syncOthers() {
+  openPopups.forEach(function (p) {
+    var el = p.getElement();
+    el = el && el.querySelector(".popup-others");
+    if (el) el.style.display = openPopups.length > 1 ? "" : "none";
+  });
+}
+map.on("popupopen", function (e) {
+  if (openPopups.indexOf(e.popup) < 0) openPopups.push(e.popup);
+  var el = e.popup.getElement();
+  if (el && !el.querySelector(".popup-others")) {
+    var btn = L.DomUtil.create("a", "leaflet-popup-close-button popup-others");
+    btn.href = "#";
+    btn.title = "Close others";
+    btn.innerHTML = OTHERS_ICON;
+    L.DomEvent.on(btn, "click", function (ev) { L.DomEvent.stop(ev); closeOthers(e.popup); });
+    el.insertBefore(btn, el.querySelector(".leaflet-popup-close-button"));
+  }
+  syncOthers();
+});
+map.on("popupclose", function (e) {
+  var i = openPopups.indexOf(e.popup);
+  if (i > -1) openPopups.splice(i, 1);
+  if (cellPopups[e.popup._cellKey] === e.popup) delete cellPopups[e.popup._cellKey];
+  syncOthers();
+});
+
+// Tile counts, if given, show at once and are replaced by the API's answer when it
+// lands. Both come from the same bbox as the links.
+function summaryPopup(box, latlng, provisional, onCounts) {
+  var key = [box.swlat, box.swlng, box.nelat, box.nelng].join(",");
+  if (cellPopups[key]) map.closePopup(cellPopups[key]);
+  var popup = L.popup({ maxWidth: 420, closeOnClick: false, autoClose: false })
+    .setLatLng(latlng)
+    .setContent('<div class="pop-body">' +
+                (provisional || "<div>counting&hellip;</div>") + links(box) + "</div>");
+  popup._cellKey = key;
+  cellPopups[key] = popup;
+  setTimeout(function () { popup.openOn(map); }, 0);   // opens at once, then fills
+  Promise.all([fetchTree(box), fetchNotExpected(box)]).then(function (res) {
+    var info = res[0];
+    var body = info
+      ? counts(info) + nearbyLine(res[1], info.a) + breakdownBody(info)
+      : (provisional || "") + '<div class="bd-warn">exact count unavailable (throttled?)</div>';
+    popup.setContent('<div class="pop-body">' + body + links(box) + "</div>");
+    if (onCounts) onCounts(info);
+  });
+}
+
+function fetchNotExpected(box) {
+  if (!HAS_LAYERS || !HAS_LAYERS.geomodel) return Promise.resolve(null);
+  var p = putBox(sideParams("a"), box);
+  p.set("expected_nearby", "false");
+  p.set("per_page", "0");
+  p.set("fields", "id");
+  p.set("ttl", "1");
+  return retryJson("https://api.inaturalist.org/v2/observations?" + p.toString())
+    .then(function (j) { return j ? j.total_results : null; });
+}
+function nearbyLine(flagged, a) {
+  if (flagged == null || !a) return "";
+  return "<div>" + flagged + " of " + a +
+         " flagged as not expected nearby by iNat's geomodel</div>";
+}
+
+// ---- draw a bounding box -------------------------------------------------
+var drawArmed = false, drawing = false, justDrew = false, dragStart = null, boxRect = null;
+var boxCounts = null;
+
+function styleBox(rect) {
+  if (!rect) return;
+  if (!boxCounts) { rect.setStyle({ fillColor: "#111", fillOpacity: 0.06 }); return; }
+  rect.setStyle({ fillColor: "rgb(" + rgbCss(rampColor(shareT(shareOf(boxCounts)))) + ")",
+                  fillOpacity: 1 });
+}
+
+// One button, three states: draw / cancel while armed / clear once a box exists.
+function syncDrawButton() {
+  var b = document.getElementById("drawbox");
+  b.textContent = drawArmed ? "✕ cancel" : boxRect ? "✕ clear box" : "▭ draw box";
+  b.title = drawArmed ? "Stop drawing."
+          : boxRect ? "Remove the drawn region. Draw another after clearing this one."
+          : "Drag a rectangle to count a whole region instead of one cell.";
+}
+function setDrawArmed(on) {
+  drawArmed = on;
+  map.getContainer().style.cursor = on ? "crosshair" : "";
+  if (on) { map.dragging.disable(); if (tip) { map.removeLayer(tip); tip = null; } }
+  else map.dragging.enable();
+  syncDrawButton();
+}
+function clearBox() {
+  if (boxRect) { map.removeLayer(boxRect); boxRect = null; }
+  boxCounts = null;
+  syncDrawButton();
+}
+document.getElementById("drawbox").addEventListener("click", function () {
+  if (drawArmed) { setDrawArmed(false); return; }
+  map.closePopup();
+  if (boxRect) { clearBox(); return; }
+  setDrawArmed(true);
+});
+
+map.on("mousedown", function (e) {
+  if (!drawArmed) return;
+  drawing = true;
+  dragStart = e.latlng;
+  boxCounts = null;
+  if (boxRect) map.removeLayer(boxRect);
+  boxRect = L.rectangle(L.latLngBounds(dragStart, dragStart),
+    { color: "#111", weight: 1, dashArray: "5,4", fillOpacity: 0.06, interactive: false }).addTo(map);
+});
+map.on("mousemove", function (e) {
+  if (drawing && boxRect) boxRect.setBounds(L.latLngBounds(dragStart, e.latlng));
+});
+
+function finishBox() {
+  if (!drawing) return;
+  drawing = false;
+  setDrawArmed(false);
+  justDrew = true;
+  setTimeout(function () { justDrew = false; }, 250);
+  var b = boxRect.getBounds();
+  if (b.getNorth() - b.getSouth() < 1e-6 || b.getEast() - b.getWest() < 1e-6) { clearBox(); return; }
+  syncDrawButton();          // setDrawArmed ran before the box existed
+  showBoxSummary();
+}
+document.addEventListener("mouseup", finishBox);
+
+function boxBounds() {
+  var b = boxRect.getBounds();
+  return { swlat: b.getSouth(), swlng: wrapLng(b.getWest()),
+           nelat: b.getNorth(), nelng: wrapLng(b.getEast()) };
+}
+
+// Web Mercator stops at ±85.0511° and the tiles clamp anything poleward into the
+// grid's edge row, which no bbox can reach — so in the top and bottom rows of the
+// world these counts and the tile's legitimately disagree.
+var TREE_FIELDS = "(id:!t,name:!t,rank:!t,rank_level:!t,parent_id:!t," +
+  "direct_obs_count:!t,descendant_obs_count:!t)";
+function fetchTree(box) {
+  var p = putBox(baseFilters(), box);
+  p.set("taxon_id", [CFG.taxonA].concat(setIds()).join(","));
+  p.set("fields", TREE_FIELDS);
+  // ttl=1 drops the 5-minute cache to 1s, so counts reflect IDs just corrected.
+  p.set("ttl", "1");
+  return retryJson("https://api.inaturalist.org/v2/observations/taxonomy?" + p.toString())
+    .then(function (j) { return j && j.results ? readTree(j.results) : null; });
+}
+// The queried taxa are disjoint, so every observation sits under exactly one and the
+// tree decomposes the cell with no residual. direct_obs_count is what stopped at a
+// node, descendant_obs_count its whole subtree.
+function readTree(rows) {
+  var by = {}, total = 0;
+  rows.forEach(function (r) { by[r.id] = r; total += r.direct_obs_count || 0; });
+  var an = by[CFG.taxonA], a = an ? an.descendant_obs_count || 0 : 0;
+  function inside(ancestorId, node) {
+    while (node && by[node.parent_id]) {
+      node = by[node.parent_id];
+      if (node.id === ancestorId) return true;
+    }
+    return false;
+  }
+  // Taxa can nest, so an observation goes to A if it is in A's subtree, else
+  // to the deepest taxon containing it, which makes the rows sum to b exactly.
+  var mem = [], isMember = {};
+  setIds().forEach(function (id) { if (by[id]) { mem.push(by[id]); isMember[by[id].id] = true; } });
+  function enclosingMember(n) {
+    while (n && by[n.parent_id]) {
+      n = by[n.parent_id];
+      if (isMember[n.id]) return n.id;
+    }
+    return null;
+  }
+  function depth(n) { var d = 0; while (n && by[n.parent_id]) { n = by[n.parent_id]; d++; } return d; }
+  var nested = {};
+  mem.forEach(function (n) {
+    var p = enclosingMember(n);
+    if (p !== null) (nested[p] = nested[p] || []).push(n.id);
+  });
+  // Deepest first, so a taxon's own total is final before its container reads it.
+  var attr = {};
+  mem.slice().sort(function (x, y) { return depth(y) - depth(x); }).forEach(function (n) {
+    // A taxon inside A holds only A's observations, which the map counts on A's side.
+    if (an && (n.id === an.id || inside(an.id, n))) { attr[n.id] = 0; return; }
+    var c = n.descendant_obs_count || 0;
+    if (an && inside(n.id, an)) c -= a;          // A sits inside this taxon
+    (nested[n.id] || []).forEach(function (id) { c -= attr[id] || 0; });
+    attr[n.id] = c;
+  });
+  var members = mem.filter(function (n) { return attr[n.id] > 0; })
+    .map(function (n) {
+      return { id: n.id, name: n.name, rank: n.rank, rank_level: n.rank_level,
+               count: attr[n.id],
+               // Its subtree minus the taxa inside it
+               remainder: !!nested[n.id] };
+    })
+    .sort(function (x, y) { return y.count - x.count; });
+  // Only a taxon with no node at all is absent; one that resolved to zero is
+  // present but accounted for elsewhere.
+  var absent = setIds().filter(function (id) { return !by[id]; });
+  return { a: a, b: total - a, members: members, absent: absent };
+}
+function showBoxSummary() {
+  if (!boxRect) return;
+  var rect = boxRect;      // a new box can replace it while the count is in flight
+  summaryPopup(boxBounds(), rect.getBounds().getCenter(), null, function (info) {
+    if (boxRect !== rect) return;
+    boxCounts = info && info.a + info.b ? info : null;
+    styleBox(rect);
+  });
+}
+
+// ---- controls ------------------------------------------------------------
+// seeds the controls from CFG on load and writes them back to the URL
+var CONTROLS = [
+  { el: "in_seed",     param: "seed",       cfg: "seed" },
+  { el: null,          param: "withdrawn",  cfg: "withdrawn", check: true },
+  { el: null,          param: "count_axis", cfg: "countAxis" },
+  { el: null,          param: "palette",       cfg: "palette" },
+  { el: null,          param: "count_channel", cfg: "countChannel" },
+  { el: null,          param: "fit_view",   cfg: "fitView", check: true },
+  { el: "in_minset",   param: "min_set",    cfg: "minSet" },
+  // Set by the ramp handles, listed only so the URL carries them.
+  { el: null,          param: "min_share",  cfg: "minShare" },
+  { el: null,          param: "max_share",  cfg: "maxShare" },
+  // Its own checkbox handler; null when unlocked, which syncUrl omits.
+  { el: null,          param: "grid_zoom",  cfg: "gridZoom" },
+  { el: "in_countcap", param: "count_cap",  cfg: "countCap" },
+  // API filters, so they live in FILTERS and syncUrl writes them from there.
+  { el: "in_acc",      param: "acc_below_or_unknown", cfg: null }
+];
+CONTROLS.forEach(function (ctl) {
+  if (ctl.el)
+    document.getElementById(ctl.el).value = ctl.cfg ? CFG[ctl.cfg] : (FILTERS[ctl.param] || "");
+});
+// The lock bounds the grid from above only
+function syncLockNote() {
+  var el = document.getElementById("in_lock"), note = document.getElementById("lock_note");
+  el.checked = CFG.gridZoom != null;
+  note.textContent = CFG.gridZoom == null ? ""
+    : map.getZoom() < CFG.gridZoom ? "at z" + CFG.gridZoom + " · inactive"
+    : "at z" + CFG.gridZoom;
+}
+document.getElementById("in_lock").addEventListener("change", function () {
+  // Locking needs nothing — the loaded tiles are already at this zoom. Unlocking
+  // takes _resetView: redraw moves _tileZoom without _resetGrid, leaving the wrap
+  // range at the locked zoom, which puts the finer tiles on the wrong ground.
+  CFG.gridZoom = this.checked ? map.getZoom() : null;
+  if (layer) {
+    layer.options.maxNativeZoom = lockedZoom();
+    if (!this.checked) layer._resetView();
+  }
+  syncLockNote();
+  syncUrl();
+});
+Array.prototype.forEach.call(document.querySelectorAll(".check .tip"), function (t) {
+  t.addEventListener("click", function (e) { e.preventDefault(); });
+});
+
+var elA = document.getElementById("in_a");
+elA.dataset.id = CFG.taxonA;
+
+var BOX_A = null;
+function decorBox(rec) {
+  var src = rec && rec.default_photo && rec.default_photo.square_url;
+  var thumb = document.getElementById("th_a");
+  BOX_A = rec;
+  if (src) thumb.src = src;
+  thumb.hidden = !src;
+  document.getElementById("wrap_a").classList.toggle("has-thumb", !!src);
+  document.getElementById("x_a").hidden = !elA.value;
+  if (!rec) hideCard();
+}
+function setBox(rec) {
+  elA.value = rec ? longName(rec) : "";
+  decorBox(rec);
+}
+document.getElementById("x_a").addEventListener("click", function () {
+  setBox(null);
+  elA.dataset.id = "";
+  elA.focus();
+});
+
+function attachAutocomplete(input, listEl, onChoose) {
+  var timer = null, controller = null, items = [], sel = -1;
+  function close() { listEl.classList.remove("open"); listEl.innerHTML = ""; items = []; sel = -1; }
+  function choose(t) { onChoose(t); close(); }
+  function place() {
+    var r = input.getBoundingClientRect();
+    listEl.style.left = r.left + "px";
+    listEl.style.width = r.width + "px";
+    listEl.style.top = (r.bottom + 2) + "px";
+    listEl.style.maxHeight = Math.max(90, window.innerHeight - r.bottom - 12) + "px";
+  }
+  function render() {
+    listEl.innerHTML = "";
+    items.forEach(function (t, i) {
+      var row = document.createElement("div");
+      row.className = "ac-item" + (i === sel ? " sel" : "");
+      var src = t.default_photo && t.default_photo.square_url;
+      var meta = cap(t.rank || "") +
+                 (t.preferred_common_name ? " · " + t.preferred_common_name : "");
+      row.innerHTML =
+        (src ? '<img class="thumb" alt="" loading="lazy" src="' + esc(src) + '">'
+             : '<span class="thumb"></span>') +
+        '<span class="txt"><span class="sci">' + esc(t.name) + "</span>" +
+        '<div class="meta">' + esc(meta) + "</div></span>" +
+        '<span class="cnt">' + Number(t.observations_count || 0).toLocaleString() + "</span>";
+      row.addEventListener("mousedown", function (ev) { ev.preventDefault(); choose(t); });
+      listEl.appendChild(row);
+    });
+    listEl.classList.toggle("open", items.length > 0);
+    if (items.length) place();
+    if (listEl.children[sel]) listEl.children[sel].scrollIntoView({ block: "nearest" });
+  }
+  document.querySelector(".panel-inner").addEventListener("scroll", close);
+  window.addEventListener("resize", close);
+  input.addEventListener("input", function () {
+    if (input === elA) { input.dataset.id = ""; decorBox(null); }
+    var q = input.value.trim();
+    clearTimeout(timer);
+    if (controller) controller.abort();
+    if (q.length < 3) { close(); return; }
+    timer = setTimeout(function () {
+      controller = new AbortController();
+      retryJson("https://api.inaturalist.org/v2/taxa/autocomplete?per_page=8&q=" + encodeURIComponent(q) +
+            "&fields=" + encodeURIComponent(TAXON_FIELDS), controller.signal)
+        .then(function (j) { items = (j && j.results) || []; sel = -1; render(); });
+    }, 300);
+  });
+  input.addEventListener("keydown", function (e) {
+    if (!items.length) return;
+    if (e.key === "ArrowDown") { sel = Math.min(sel + 1, items.length - 1); render(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { sel = Math.max(sel - 1, 0); render(); e.preventDefault(); }
+    else if (e.key === "Enter" && sel >= 0) { choose(items[sel]); e.preventDefault(); }
+    else if (e.key === "Escape") close();
+  });
+  input.addEventListener("blur", function () { setTimeout(close, 120); });
+}
+attachAutocomplete(elA, document.getElementById("ac_a"), function (t) {
+  // Cache the full record, or showNames overwrites the box with a lean seed node.
+  TAXA[t.id] = t;
+  setBox(t);
+  elA.dataset.id = t.id;
+  applyTaxon(t.id);
+});
+// Typed text that never became a pick is abandoned on the way out.
+elA.addEventListener("blur", function () {
+  setTimeout(function () {
+    if (elA.dataset.id || document.activeElement === elA) return;
+    elA.dataset.id = CFG.taxonA;
+    setBox(TAXA[CFG.taxonA]);
+  }, 150);
+});
+var elAdd = document.getElementById("in_add");
+attachAutocomplete(elAdd, document.getElementById("ac_add"), function (t) {
+  var id = String(t.id);
+  elAdd.value = "";
+  if (id === CFG.taxonA || setIds().indexOf(id) !== -1) return;
+  TAXA[id] = t;
+  CFG.setIds = setIds().concat([id]);
+  fillSeedCount(id);
+  applyPanel();
+});
+
+// ---- taxon card ----------------------------------------------------------
+// Hovering a thumbnail previews its taxon
+var cardEl = document.getElementById("taxcard"), cardShow = null, cardHide = null;
+var LICENSE = {
+  "cc-by": ["CC BY", "https://creativecommons.org/licenses/by/4.0/"],
+  "cc-by-nc": ["CC BY-NC", "https://creativecommons.org/licenses/by-nc/4.0/"],
+  "cc-by-sa": ["CC BY-SA", "https://creativecommons.org/licenses/by-sa/4.0/"],
+  "cc-by-nd": ["CC BY-ND", "https://creativecommons.org/licenses/by-nd/4.0/"],
+  "cc-by-nc-sa": ["CC BY-NC-SA", "https://creativecommons.org/licenses/by-nc-sa/4.0/"],
+  "cc-by-nc-nd": ["CC BY-NC-ND", "https://creativecommons.org/licenses/by-nc-nd/4.0/"],
+  "cc0": ["CC0", "https://creativecommons.org/publicdomain/zero/1.0/"]
+};
+function creditHtml(p) {
+  if (!p.attribution_name) return esc(p.attribution || "");   // iNat's own string
+  var lic = LICENSE[p.license_code];
+  return esc((p.license_code === "cc0" ? "" : "(c) ") + p.attribution_name) +
+    (lic ? ' – (<a href="' + lic[1] + '" target="_blank" rel="noopener license">' + lic[0] + "</a>)"
+         : " – all rights reserved");
+}
+function renderCard(t) {
+  var p = t.default_photo, out = "";
+  if (p && (p.medium_url || p.square_url)) {
+    out += '<a href="https://www.inaturalist.org/photos/' + encodeURIComponent(p.id) +
+           '" target="_blank" rel="noopener" title="Open this photo on iNaturalist">' +
+           '<img class="photo" alt="" loading="lazy" src="' + esc(p.medium_url || p.square_url) +
+           '"></a><div class="attr">' + creditHtml(p) + "</div>";
+  }
+  var sci = rankPrefix(t) + shortName(t);
+  out += '<div class="body"><div class="sci' +
+         (t.rank_level != null && t.rank_level <= 20 ? " italic" : "") + '">' + esc(sci) + "</div>" +
+         (t.preferred_common_name ? '<div class="common">' + esc(t.preferred_common_name) + "</div>" : "") +
+         '<div class="meta">' + esc(cap(t.rank || "")) +
+         (typeof t.observations_count === "number"
+            ? " · " + t.observations_count.toLocaleString() + " observations" : "") + "</div>" +
+         (String(t.id) === CFG.taxonA ? ""
+            : '<a class="more audit" href="#" data-id="' + esc(t.id) + '">' +
+              "Audit this taxon &rarr;</a>") +
+         '<a class="more" href="https://www.inaturalist.org/taxa/' + encodeURIComponent(t.id) +
+         '" target="_blank" rel="noopener">View on iNaturalist &rarr;</a></div>';
+  cardEl.innerHTML = out;
+}
+function placeCard(anchor) {
+  var r = anchor.getBoundingClientRect(), w = cardEl.offsetWidth, h = cardEl.offsetHeight;
+  var left = r.right + 10;
+  if (left + w > window.innerWidth - 8) left = r.left - w - 10;
+  cardEl.style.left = Math.max(8, left) + "px";
+  cardEl.style.top = Math.max(8, Math.min(r.top, window.innerHeight - h - 8)) + "px";
+}
+function hideCard() { cardEl.classList.remove("open"); }
+function scheduleCardHide() {
+  clearTimeout(cardShow); clearTimeout(cardHide);
+  cardHide = setTimeout(hideCard, 200);
+}
+function attachCard(anchor, getRec) {
+  anchor.addEventListener("mouseenter", function () {
+    clearTimeout(cardHide); clearTimeout(cardShow);
+    cardShow = setTimeout(function () {
+      var t = getRec();
+      if (!t || !t.name) return;
+      renderCard(t);
+      cardEl.classList.add("open");   // measurable only once shown
+      placeCard(anchor);
+    }, 350);
+  });
+  anchor.addEventListener("mouseleave", scheduleCardHide);
+}
+attachCard(document.getElementById("th_a"), function () { return BOX_A; });
+cardEl.addEventListener("mouseenter", function () { clearTimeout(cardHide); });
+cardEl.addEventListener("mouseleave", scheduleCardHide);
+// the card's contents are rewritten on every hover.
+cardEl.addEventListener("click", function (e) {
+  var a = e.target.closest && e.target.closest(".audit");
+  if (!a) return;
+  e.preventDefault();
+  hideCard();
+  applyTaxon(a.getAttribute("data-id"));
+});
+
+document.getElementById("in_preset").addEventListener("change", function () {
+  if (!this.value) return;
+  var id = this.value;
+  this.value = "";   // otherwise re-picking the same preset fires no change event
+  applyTaxon(id);
+});
+var GRADES = [{ value: "needs_id", label: "needs ID" },
+              { value: "research", label: "research" }];
+function gradesOn() {
+  var q = FILTERS.quality_grade ? FILTERS.quality_grade.split(",") : null;
+  return GRADES.map(function (g) { return g.value; })
+               .filter(function (v) { return !q || q.indexOf(v) !== -1; });
+}
+function renderGrades() {
+  var box = document.getElementById("qg_checks"), on = gradesOn();
+  box.innerHTML = "";
+  GRADES.forEach(function (g) {
+    var lbl = document.createElement("label"), cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = on.indexOf(g.value) !== -1;
+    cb.disabled = cb.checked && on.length === 1;
+    lbl.className = "check" + (cb.disabled ? " off" : "");
+    cb.addEventListener("change", function () {
+      var next = cb.checked ? on.concat([g.value])
+                            : on.filter(function (v) { return v !== g.value; });
+      if (next.length === GRADES.length) delete FILTERS.quality_grade;
+      else FILTERS.quality_grade = next.join(",");
+      renderGrades();
+      applyPanel();
+    });
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(g.label));
+    box.appendChild(lbl);
+  });
+}
+var COUNT_AXIS = [
+  { value: "set", label: "confusion set",
+    title: "The count of observations across the whole confusion set." },
+  { value: "audited", label: "audited taxon",
+    title: "The count of observations of the audited taxon." }
+];
+function renderCountAxisSeg() {
+  renderSeg("seg_countaxis", COUNT_AXIS, CFG.countAxis, function (v) {
+    CFG.countAxis = v;
+    renderCountAxisSeg();
+    applyPanel();
+  });
+}
+var typedTimer = null;
+["in_minset", "in_countcap"].forEach(function (id) {
+  document.getElementById(id).addEventListener("input", function () {
+    clearTimeout(typedTimer);
+    typedTimer = setTimeout(applyPanel, 400);
+  });
+});
+// This one refetches, so it waits for a finished value: change is Enter or blur.
+document.getElementById("in_acc").addEventListener("change", applyPanel);
+// Hand-added taxa are dropped — that is what re-slicing the seed means.
+document.getElementById("in_seed").addEventListener("change", function () {
+  CFG.seed = this.value;
+  // Re-slice the rows the last seed produced, viewport or global; re-seeding here
+  // would rescope a viewport set back to the world. The fetch is only for rows a
+  // shared link never loaded.
+  if (seedTaxon === CFG.taxonA && SEED_ROWS.length) {
+    CFG.setIds = sliceSeed(SEED_ROWS);
+    refreshTaxa();
+    applyPanel();
+  } else {
+    reseed();
+  }
+});
+var VIEW_TITLE = document.getElementById("reseed_view").title;
+function syncSeedSrc() {
+  var b = document.getElementById("reseed_view"), off = seedSrcNow() === "both";
+  b.disabled = off;
+  b.title = off ? "Only available when seeding from current IDs." : VIEW_TITLE;
+}
+var SEED_SRC = [
+  { value: "current", label: "current",
+    title: "Identifications of the audited taxon that are not withdrawn. Chips count observations." },
+  { value: "both", label: "current + withdrawn",
+    title: "Current and withdrawn identifications. Uses a different method and does *not* produce a superset of the current results. Not available for ranks other than species, or for local viewports. Chips count identifications." }
+];
+function renderSeedSrcSeg() {
+  var off = withdrawnOk() ? null : "Only available for global species audits.";
+  var opts = SEED_SRC.map(function (o) {
+    return o.value === "both" ? Object.assign({ off: off }, o) : o;
+  });
+  renderSeg("seg_seedsrc", opts, seedSrcNow(), function (v) {
+    CFG.withdrawn = v === "both";
+    renderSeedSrcSeg();
+    syncSeedSrc();
+    reseed();
+  });
+}
+document.getElementById("reseed").addEventListener("click", function () { reseed(); });
+document.getElementById("reseed_view").addEventListener("click", function () {
+  reseed(visibleBounds());
+});
+var REFRESH_LABEL = "↻ refresh tiles", refreshTimer = null;
+document.getElementById("refresh").addEventListener("click", function () {
+  if (!layer || !map.hasLayer(layer)) return;    // no load event to clear it again
+  var btn = this;
+  map.closePopup();
+  layer.options.bust = Date.now();
+  layer.once("load", function () { layer.options.bust = null; });
+  throttled = 0; gaveUp = 0; setStatus();     // every tile is about to be re-asked
+  layer.redraw();
+  btn.textContent = "↻ refreshed";
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(function () { btn.textContent = REFRESH_LABEL; }, 1400);
+});
+function applyPanel() {
+  CFG.countCap  = Math.max(2, parseFloat(document.getElementById("in_countcap").value) || 100);
+  CFG.minSet    = Math.max(0, parseFloat(document.getElementById("in_minset").value) || 0);
+
+  var acc = Math.floor(parseFloat(document.getElementById("in_acc").value));
+  if (acc > 0) FILTERS.acc_below_or_unknown = String(acc);
+  else delete FILTERS.acc_below_or_unknown;
+
+  var urlA = gridUrl("a"), urlB = gridUrl("set");
+  if (layer && layer.options.urlA === urlA && layer.options.urlB === urlB) {
+    layer.repaint();
+  } else {
+    // removeLayer fires overlayremove on a layer the control knows, clearing
+    // cellsShown before it is read.
+    var wasVisible = cellsShown;
+    if (layer) map.removeLayer(layer);
+    throttled = 0; gaveUp = 0; setStatus();
+    layer = new CellLayer({ urlA: urlA, urlB: urlB, zIndex: 400,
+                            maxNativeZoom: lockedZoom() });
+    layer.on("load", noteTileLoad);
+    // Only back on if it was showing
+    if (wasVisible) layer.addTo(map);
+    cellsShown = wasVisible;
+    controlKey = null;      // the control is holding the instance just discarded
+  }
+  renderRamp();
+  styleBox(boxRect);       // same scale, so the box follows the palette
+  syncOverlayUrls();
+  showNames();
+  syncUrl();
+  syncFitButton();
+}
+
+// ---- fitting the count scale ---------------------------------------------
+// The top of the count ramp, from the cells on screen. Essentially a 10% clip.
+var FIT_PCTL = 0.9;          // not the max, or one city cell flattens the rest
+function viewCounts() {
+  if (!layer || !map.hasLayer(layer)) return [];
+  var seen = {}, vals = [];
+  for (var k in layer._tiles) {
+    var key = layer.dataKey(layer._tiles[k].coords);
+    if (seen[key]) continue;      // a tile on two copies of the world is one tile
+    seen[key] = true;
+    var td = layer._tileData[key];
+    if (!td) continue;
+    for (var r = 0; r < td.rows; r++) {
+      for (var q = 0; q < td.cols; q++) {
+        if (drawable(td.cells[r][q])) vals.push(countOf(td.cells[r][q]));
+      }
+    }
+  }
+  return vals;
+}
+function niceCap(v) {
+  var e = Math.pow(10, Math.floor(Math.log10(v))), m = v / e;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * e;
+}
+// null only where nothing is drawn
+function fittedCap() {
+  var vals = viewCounts();
+  if (!vals.length) return null;
+  vals.sort(function (x, y) { return x - y; });
+  return Math.max(2, niceCap(vals[Math.min(vals.length - 1,
+                                           Math.floor(vals.length * FIT_PCTL))]));
+}
+function applyFit() {
+  var fit = fittedCap();
+  if (fit == null) return false;
+  document.getElementById("in_countcap").value = fit;
+  applyPanel();          // appearance only, so this repaints rather than refetching
+  return true;
+}
+
+// Debounced on tile loads
+var fitPending = false, fitTimer = null;
+function noteTileLoad() {
+  syncFitButton();
+  if (!fitPending) return;
+  clearTimeout(fitTimer);
+  fitTimer = setTimeout(function () {
+    if (fitPending && applyFit()) fitPending = false;
+  }, 400);
+}
+document.getElementById("in_countcap").addEventListener("input", function () {
+  fitPending = false;               // a typed cap takes over from a pending fit
+});
+// Amber when fit has drifted too far
+var FIT_DRIFT = 3;
+var FIT_TITLE = document.getElementById("fitcap").title;
+function syncFitButton() {
+  var btn = document.getElementById("fitcap"), fit = fittedCap();
+  var off = fit != null && (fit / CFG.countCap >= FIT_DRIFT || CFG.countCap / fit >= FIT_DRIFT);
+  btn.classList.toggle("warn", off);
+  btn.title = off ? "Recommended: re-fit to the cells in view." : FIT_TITLE;
+}
+
+var FIT_LABEL = "↕ fit", fitFlash = null;
+document.getElementById("fitcap").addEventListener("click", function () {
+  var btn = this;
+  fitPending = false;
+  btn.textContent = applyFit() ? "fitted" : "no cells";
+  clearTimeout(fitFlash);
+  fitFlash = setTimeout(function () { btn.textContent = FIT_LABEL; }, 1200);
+});
+
+var FIT_MAX_ZOOM = 10;
+function taxonBounds(taxonId, expected) {
+  var p = baseFilters();
+  p.set("taxon_id", taxonId);
+  p.set("per_page", "0");
+  p.set("return_bounds", "true");
+  p.set("fields", "id");
+  if (expected) p.set("expected_nearby", "true");
+  return retryJson("https://api.inaturalist.org/v2/observations?" + p.toString())
+    .then(function (j) { return (j && j.total_bounds) || null; });
+}
+// zoom/pan to taxon's obs; uses geomodel when one exists, to remove outliers
+function fitTaxonBounds(taxonId, doFit) {
+  taxonBounds(taxonId, true).then(function (b) {
+    return b || taxonBounds(taxonId, false);
+  }).then(function (b) {
+    if (!b || String(taxonId) !== CFG.taxonA) return;
+    taxonExtent = b;
+    if (doFit)
+      map.fitBounds(L.latLngBounds([Math.max(-80, b.swlat), Math.max(-179.9, b.swlng)],
+                                   [Math.min(80, b.nelat), Math.min(179.9, b.nelng)]),
+                    { maxZoom: FIT_MAX_ZOOM, paddingTopLeft: [panelPad(), 10],
+                      paddingBottomRight: [10, 10] });
+    syncFitViewButton();
+  });
+}
+var taxonExtent = null;
+function syncFitViewButton() {
+  var off = !!taxonExtent && !map.getBounds().intersects(
+    L.latLngBounds([taxonExtent.swlat, taxonExtent.swlng],
+                   [taxonExtent.nelat, taxonExtent.nelng]));
+  document.getElementById("fitview").classList.toggle("warn", off);
+}
+document.getElementById("fitview").addEventListener("click", function () {
+  fitTaxonBounds(CFG.taxonA, true);
+});
+var autoFitBtn = document.getElementById("autofit");
+function syncAutoFit() {
+  autoFitBtn.classList.toggle("on", CFG.fitView);
+  autoFitBtn.setAttribute("aria-pressed", CFG.fitView ? "true" : "false");
+}
+autoFitBtn.addEventListener("click", function () {
+  CFG.fitView = !CFG.fitView;
+  syncAutoFit();
+  syncUrl();
+});
+
+// A new taxon means a new confusion set, so the seed runs before anything is drawn
+// and the previous pairing stays up until it lands.
+function applyTaxon(taxonA) {
+  if (String(taxonA) === CFG.taxonA) { applyPanel(); return; }
+  closeAllPopups();
+  clearBox();
+  CFG.taxonA = String(taxonA);
+  // null, not [] — not yet seeded, and a seed that fails to land must not leave
+  // the link claiming an empty set was chosen.
+  CFG.setIds = null;
+  elA.dataset.id = CFG.taxonA;
+  fitPending = true;       // a new taxon refits the count scale either way
+  taxonExtent = null;
+  syncFitViewButton();
+  fitTaxonBounds(CFG.taxonA, CFG.fitView);
+  fetchMapLayers();
+  reseed();
+}
+
+var SHARE_URL = "https://jwidness.github.io/iNat_local_outlier_map.html";
+var shareLink = SHARE_URL;
+
+function syncUrl() {
+  var p = new URLSearchParams();
+  p.set("taxon_id", CFG.taxonA);
+  // Absent means "seed it", empty means "the set is empty"
+  if (CFG.setIds) p.set("taxon_set", CFG.setIds.join(","));
+  CONTROLS.forEach(function (ctl) {
+    if (ctl.cfg && CFG[ctl.cfg] != null) p.set(ctl.param, ctl.check ? (CFG[ctl.cfg] ? 1 : 0) : CFG[ctl.cfg]);
+  });
+  Object.keys(FILTERS).forEach(function (k) { p.set(k, FILTERS[k]); });
+  Object.keys(BASEMAP_KEYS).forEach(function (k) {
+    if (map.hasLayer(BASEMAPS[BASEMAP_KEYS[k]])) p.set("basemap", k);
+  });
+  var c = map.getCenter();
+  // Wrapped, or panning onto another copy of the world writes a longitude the
+  // link's own range check rejects on load.
+  p.set("lat", c.lat.toFixed(4)); p.set("lng", wrapLng(c.lng).toFixed(4));
+  p.set("zoom", map.getZoom());
+  // Unescaped, so commas and colons read like iNat's own URLs.
+  var q = p.toString().replace(/%2C/g, ",").replace(/%3A/g, ":");
+  try { history.replaceState(null, "", location.pathname + "?" + q); } catch (e) {}
+  shareLink = SHARE_URL + "?" + q;
+}
+
+var COPY_LABEL = "⧉ share link", copyTimer = null;
+document.getElementById("copyShare").addEventListener("click", function () {
+  var btn = this;
+  function flash() {
+    btn.textContent = "✓ copied";
+    btn.classList.add("copied");
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(function () {
+      btn.textContent = COPY_LABEL;
+      btn.classList.remove("copied");
+    }, 1200);
+  }
+  navigator.clipboard.writeText(shareLink).then(flash);
+});
+
+document.getElementById("panelToggle").addEventListener("click", function () {
+  hideCard();
+  var collapsed = document.getElementById("panel").classList.toggle("collapsed");
+  this.textContent = collapsed ? "v" : "^";
+  this.title = collapsed ? "Expand panel" : "Collapse panel";
+});
+
+var helpModal = document.getElementById("helpModal"), helpIframe = document.getElementById("helpIframe");
+function openHelp() {
+  helpIframe.src = "iNat_local_outlier_map_help.html";
+  helpModal.classList.add("open");
+  helpModal.setAttribute("aria-hidden", "false");
+}
+function closeHelp() {
+  helpModal.classList.remove("open");
+  helpModal.setAttribute("aria-hidden", "true");
+  helpIframe.src = "about:blank";
+}
+document.getElementById("helpOpen").addEventListener("click", function (e) {
+  e.preventDefault();
+  openHelp();
+});
+document.getElementById("helpModalClose").addEventListener("click", closeHelp);
+document.getElementById("helpModalOverlay").addEventListener("click", closeHelp);
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape" && helpModal.classList.contains("open")) closeHelp();
+});
+window.addEventListener("message", function (e) {
+  if (e.data === "closeHelpModal" && helpModal.classList.contains("open")) closeHelp();
+});
+
+map.on("moveend", function () { syncUrl(); syncFitButton(); syncFitViewButton(); });
+map.on("zoomend", syncLockNote);     // the lock lapses below its own zoom
+
+// ---- boot ----------------------------------------------------------------
+// A link with no taxon_set has never been seeded, so the set is fetched before
+// the first tiles go out
+function boot() {
+  fitPending = !qs.has("count_cap");      // a link carrying one has chosen its scale
+  fetchMapLayers();
+  // A view in the link wins; without one, fit the taxon exactly as a pick would.
+  fitTaxonBounds(CFG.taxonA, !qs.has("lat") && !qs.has("lng") && !qs.has("zoom"));
+  if (!CFG.setIds) { reseed(); return; }
+  // The link carries its own set, so the map draws at once. The seed rows are still
+  // fetched without changing it: they carry the chips' counts, and the threshold
+  // dropdown re-slices them.
+  applyPanel();
+  // A taxon the link names but the seed missed is counted here, which needs its rank.
+  ranked().then(function () {
+    return Promise.all([refreshTaxa(), fetchSeed(CFG.taxonA)]);
+  }).then(function () {
+    // A failed seed leaves nothing to net those counts against.
+    if (seedTaxon === CFG.taxonA) setIds().forEach(fillSeedCount);
+    runDiag();
+  });
+}
+renderRamp();
+syncPaletteBtn();
+renderChannelSeg();
+renderCountAxisSeg();
+renderSeedSrcSeg();
+renderGrades();
+syncSignBox();
+syncAutoFit();
+syncSeedSrc();
+syncLockNote();
+boot();
+</script>
+</body>
+</html>
